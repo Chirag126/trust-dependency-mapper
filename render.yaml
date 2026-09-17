@@ -1,0 +1,52 @@
+services:
+  - type: web
+    name: trust-dependency-mapper-api
+    runtime: node
+    rootDir: server
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 26.8.2
+      - key: NPM_VERSION
+        value: 11.19.1
+      - key: NODE_ENV
+        value: production
+      - key: CORS_ORIGIN
+        sync: false
+      - key: RPC_ETHEREUM
+        sync: false
+      - key: RPC_SEPOLIA
+        sync: false
+      - key: RPC_ARBITRUM
+        sync: false
+      - key: RPC_BASE
+        sync: false
+      - key: GITHUB_TOKEN
+        sync: false
+      - key: ADMIN_USERNAME
+        sync: false
+      - key: ADMIN_PASSWORD
+        sync: false
+      - key: ADMIN_JWT_SECRET
+        sync: false
+      - key: DATABASE_PATH
+        value: /var/data/tdm.sqlite
+      - key: MAX_ZIP_MB
+        value: "20"
+    disk:
+      name: tdm-data
+      mountPath: /var/data
+      sizeGB: 1
+
+  - type: static
+    name: trust-dependency-mapper-web
+    rootDir: web
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    autoDeploy: true
+    envVars:
+      - key: VITE_API_URL
+        sync: false

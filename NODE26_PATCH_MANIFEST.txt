@@ -1,0 +1,21 @@
+Trust Dependency Mapper v2 -> Node.js 26.8.2 patch
+
+Only changed/added files are included in this ZIP.
+
+Changed:
+- server/package.json
+- server/.env.example
+- server/src/db.ts
+- server/src/config.ts
+- server/src/index.ts
+- server/tsconfig.json
+- README.md
+
+Added:
+- .nvmrc
+- .node-version
+- server/src/runtime.ts
+- NODE26_UPGRADE.md
+- NODE26_PATCH_MANIFEST.txt
+
+Main compatibility change: remove native better-sqlite3 and use Node.js 26's built-in node:sqlite DatabaseSync.
