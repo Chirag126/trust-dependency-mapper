@@ -48,7 +48,7 @@ app.post("/api/analyze/github",async(req,res)=>{
   const p=z.object({url:z.string().url()}).safeParse(req.body);
   if(!p.success)return res.status(400).json({error:"Valid GitHub repository URL required"});
   try{const {owner,repo}=normalizeGithub(p.data.url);const a=await analyzeGithub(owner,repo);saveAnalysis(a,session(req));res.json(a);}
-  catch(e:any){res.status(400).json({error:e.message||"GitHub analysis failed"});}
+  catch(e:any){console.error("GitHub analysis failed:",e);res.status(400).json({error:e.message||"GitHub analysis failed"});}
 });
 function extractZip(buffer:Buffer){
   const zip=new AdmZip(buffer);const entries=zip.getEntries();if(entries.length>1000)throw new Error("ZIP contains too many entries");

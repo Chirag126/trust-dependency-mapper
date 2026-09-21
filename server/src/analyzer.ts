@@ -30,9 +30,12 @@ function dedupe(ds:Dependency[]){
 }
 function graph(root:string,ds:Dependency[],links:{from:string;to:string;relation:string;evidence?:Evidence[]}[]=[]){
   const nodes:GraphNode[]=[{id:"root",label:root,kind:"root"}]; const edges:GraphEdge[]=[];
-  for(const d of ds)nodes.push({id:d.id,label:d.name,kind:"dependency",dependencyId:d.id,severity:d.severity});
+  const validIds=new Set<string>(["root"]);
+  for(const d of ds){nodes.push({id:d.id,label:d.name,kind:"dependency",dependencyId:d.id,severity:d.severity});validIds.add(d.id);}
   for(const d of ds)edges.push({source:"root",target:d.id,relation:d.type,evidence:d.evidence});
-  for(const l of links)edges.push({source:l.from,target:l.to,relation:l.relation,evidence:l.evidence});
+  for(const l of links){
+    if(validIds.has(l.from)&&validIds.has(l.to))edges.push({source:l.from,target:l.to,relation:l.relation,evidence:l.evidence});
+  }
   return {nodes,edges};
 }
 

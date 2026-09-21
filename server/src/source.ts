@@ -1,4 +1,5 @@
 import { ethers } from "ethers";
+import AdmZip from "adm-zip";
 import { config } from "./config";
 import { withTimeout } from "./chain";
 
@@ -88,29 +89,127 @@ export async function fetchSourcify(address:string,chainId:number){
   try{const res=await fetch(url);if(!res.ok)return null;return await res.json();}catch{return null;}
 }
 
-export async function fetchGithubFile(owner:string,repo:string,path:string){
-  const headers:Record<string,string>={"Accept":"application/vnd.github+json"};
+async function fetchWithTimeout(url:string,init:RequestInit={},timeoutMs=20_000){
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeoutMs);
+  try{return await fetch(url,{...init,signal:controller.signal});}
+  catch(e:any){
+    if(e?.name==="AbortError")throw new Error(`GitHub request timed out after ${Math.round(timeoutMs/1000)}s`);
+    throw e;
+  }
+  finally{clearTimeout(timer);}
+}
+
+function githubHeaders(){
+  const headers:Record<string,string>={"Accept":"application/vnd.github+json","User-Agent":"trust-dependency-mapper"};
   if(config.githubToken)headers.Authorization=`Bearer ${config.githubToken}`;
-  const res=await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`,{headers});
-  if(!res.ok)throw new Error(`GitHub API error ${res.status}`);
+  return headers;
+}
+
+async function githubResponseError(res:Response,kind:string){
+  const remaining=res.headers.get("x-ratelimit-remaining");
+  const reset=res.headers.get("x-ratelimit-reset");
+  if(res.status===403||res.status===429){
+    const resetText=reset?` Rate-limit reset epoch: ${reset}.`:"";
+    return `GitHub ${kind} request was rate-limited (${res.status}).${remaining!==null?` Remaining requests: ${remaining}.`:""}${resetText}${config.githubToken?"":" Set GITHUB_TOKEN in Render for higher API limits."}`;
+  }
+  let body="";
+  try{body=(await res.text()).replace(/\s+/g," ").slice(0,240);}catch{}
+  return `GitHub ${kind} request failed (${res.status})${body?`: ${body}`:""}`;
+}
+
+export async function fetchGithubFile(owner:string,repo:string,path:string){
+  const res=await fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/contents/${path}`,{headers:githubHeaders()});
+  if(!res.ok)throw new Error(await githubResponseError(res,"file"));
   const json:any=await res.json();
   if(!json.content)throw new Error("GitHub item is not a file");
-  return Buffer.from(json.content,"base64").toString("utf8");
+  return Buffer.from(json.content.replace(/\n/g,""),"base64").toString("utf8");
 }
+
 export async function listGithubTree(owner:string,repo:string){
-  const headers:Record<string,string>={"Accept":"application/vnd.github+json"};
-  if(config.githubToken)headers.Authorization=`Bearer ${config.githubToken}`;
-  const meta:any=await (await fetch(`https://api.github.com/repos/${owner}/${repo}`,{headers})).json();
-  if(!meta.default_branch)throw new Error("Unable to read repository metadata");
-  const res=await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${meta.default_branch}?recursive=1`,{headers});
-  if(!res.ok)throw new Error(`GitHub tree error ${res.status}`);
+  const metaRes=await fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`,{headers:githubHeaders()});
+  if(!metaRes.ok)throw new Error(await githubResponseError(metaRes,"repository metadata"));
+  const meta:any=await metaRes.json();
+  if(!meta.default_branch)throw new Error("Unable to read repository metadata: default branch missing");
+  const res=await fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}/git/trees/${encodeURI(meta.default_branch)}?recursive=1`,{headers:githubHeaders()});
+  if(!res.ok)throw new Error(await githubResponseError(res,"repository tree"));
   const tree:any=await res.json();
+  if(tree.truncated)throw new Error("GitHub repository tree is too large; use a GitHub token or upload the project ZIP instead");
   return {branch:meta.default_branch,tree:tree.tree||[]};
 }
-export async function githubRepoFiles(owner:string,repo:string){
-  const {tree}=await listGithubTree(owner,repo);
-  const files=tree.filter((x:any)=>x.type==="blob"&&/\.(sol|json)$/i.test(x.path)).slice(0,400);
+
+function extractGithubArchive(buffer:Buffer){
+  const zip=new AdmZip(buffer);
+  const entries=zip.getEntries();
+  if(entries.length>5000)throw new Error("GitHub repository archive contains too many files");
   const result:{path:string;content:string}[]=[];
-  for(const f of files){try{const content=await fetchGithubFile(owner,repo,f.path);if(Buffer.byteLength(content,"utf8")<=1_000_000)result.push({path:f.path,content});}catch{}}
+  let totalBytes=0;
+  for(const e of entries){
+    if(e.isDirectory)continue;
+    const n=e.entryName.replace(/\\/g,"/");
+    const parts=n.split("/");
+    const relative=parts.length>1?parts.slice(1).join("/"):parts[0];
+    if(!relative||!/^.+\.(sol|json)$/i.test(relative))continue;
+    const data=e.getData();
+    if(data.length>1_000_000)continue;
+    totalBytes+=data.length;
+    if(totalBytes>20*1024*1024)break;
+    result.push({path:relative,content:data.toString("utf8")});
+    if(result.length>=400)break;
+  }
   return result;
+}
+
+async function fetchGithubArchive(owner:string,repo:string,branch:string){
+  const url=`https://codeload.github.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/zip/refs/heads/${encodeURI(branch)}`;
+  const res=await fetchWithTimeout(url,{headers:config.githubToken?{Authorization:`Bearer ${config.githubToken}`}:{}},30_000);
+  if(!res.ok)throw new Error(await githubResponseError(res,"archive"));
+  return extractGithubArchive(Buffer.from(await res.arrayBuffer()));
+}
+
+export async function githubRepoFiles(owner:string,repo:string){
+  // Public repositories are fetched as one archive instead of one Contents API call per file.
+  // This avoids GitHub's low unauthenticated API limit during repeated demo analyses.
+  const candidates:string[]=[];
+  if(!config.githubToken){
+    candidates.push("main","master");
+    try{
+      const metaRes=await fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`,{headers:githubHeaders()});
+      if(metaRes.ok){
+        const meta:any=await metaRes.json();
+        if(meta.default_branch&&!candidates.includes(meta.default_branch))candidates.unshift(meta.default_branch);
+      }
+    }catch{}
+  }else{
+    const metaRes=await fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`,{headers:githubHeaders()});
+    if(!metaRes.ok)throw new Error(await githubResponseError(metaRes,"repository metadata"));
+    const meta:any=await metaRes.json();
+    if(!meta.default_branch)throw new Error("Unable to read repository metadata: default branch missing");
+    candidates.push(meta.default_branch);
+  }
+
+  let lastError:any=null;
+  for(const branch of [...new Set(candidates)]){
+    try{
+      const result=await fetchGithubArchive(owner,repo,branch);
+      if(result.length)return result;
+      lastError=new Error(`GitHub archive for branch '${branch}' contained no Solidity/JSON files`);
+    }catch(e){lastError=e;}
+  }
+
+  // If the common branch names failed and no token is configured, make one final API attempt
+  // to discover a non-standard default branch and then download that branch as an archive.
+  if(!config.githubToken){
+    const metaRes=await fetchWithTimeout(`https://api.github.com/repos/${owner}/${repo}`,{headers:githubHeaders()});
+    if(!metaRes.ok)throw new Error(await githubResponseError(metaRes,"repository metadata"));
+    const meta:any=await metaRes.json();
+    if(meta.default_branch&&!candidates.includes(meta.default_branch)){
+      try{
+        const result=await fetchGithubArchive(owner,repo,meta.default_branch);
+        if(result.length)return result;
+      }catch(e){lastError=e;}
+    }
+  }
+
+  throw lastError||new Error("Unable to read GitHub repository archive");
 }
