@@ -5,7 +5,6 @@ import { id, now, severityRank } from "./utils";
 import { getContractContext, Network, traceCall, collectTraceAddresses } from "./chain";
 import { readProxySlots, probeProxy, readAccessControl, githubRepoFiles } from "./source";
 
-const ERC1967_BEACON_SLOT="0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee3d7e5a5d0c6b5d5f5f5";
 const ORACLE_NAMES=/oracle|aggregator|pricefeed|price.?feed|chainlink|pyth|redstone|tellor/i;
 const BRIDGE_NAMES=/bridge|messenger|crosschain|layerzero|wormhole|ccip|optimismportal|arbiter/i;
 const ADMIN_NAMES=/owner|admin|operator|guardian|governor|multisig|pauser|upgrade/i;
@@ -37,26 +36,186 @@ function graph(root:string,ds:Dependency[],links:{from:string;to:string;relation
   return {nodes,edges};
 }
 
-function sourceAnalyze(files:{path:string;content:string}[],logs:any[]){
-  const sources:any={}; for(const f of files)if(f.path.endsWith(".sol"))sources[f.path]={content:f.content};
-  const contracts:any[]=[];
-  if(Object.keys(sources).length){
-    log(logs,"info",`Compiling ${Object.keys(sources).length} Solidity source files`);
-    const input={language:"Solidity",sources,settings:{outputSelection:{"*":{"*":["abi","metadata","evm.deployedBytecode.object","storageLayout"]}}}};
-    let out:any={};
-    try{out=JSON.parse(solc.compile(JSON.stringify(input),{import:(p:string)=>{const f=files.find(x=>x.path===p||x.path.endsWith("/"+p));return f?{contents:f.content}:{error:"not found"};}}));}
-    catch(e){log(logs,"error","Solidity compilation failed; continuing with source heuristics");}
-    const errors=(out.errors||[]).filter((e:any)=>e.severity==="error"); if(errors.length)log(logs,"warn",`${errors.length} compiler errors`);
-    for(const [file,cs] of Object.entries(out.contracts||{}))for(const [name,c] of Object.entries(cs as any)){
-      contracts.push({file,name,abi:(c as any).abi||[],bytecode:(c as any).evm?.deployedBytecode?.object||"",storageLayout:(c as any).storageLayout});
+type SourceFile = {path:string;content:string};
+type SourceContract = {file:string;name:string;kind:"contract"|"interface"|"library"|"abstract";bases:string[];imports:string[];abi:any[];bytecode:string;storageLayout?:any};
+
+const SOLIDITY_PRAGMA=/pragma\s+solidity\s+([^;]+);/g;
+const IMPORT_RE=/import\s+(?:[^;]*?\s+from\s+)?["']([^"']+)["']\s*;/g;
+const DECL_RE=/(abstract\s+)?(contract|interface|library)\s+([A-Za-z_][A-Za-z0-9_]*)(?:\s+is\s+([^\{]+))?\s*\{/g;
+
+function lineOf(text:string,index:number){return text.slice(0,index).split("\n").length;}
+function normalizePath(p:string){return p.replace(/\\/g,"/").replace(/^\.\//,"").replace(/\/\.\//g,"/");}
+function resolveImport(importer:string,requested:string,files:SourceFile[]){
+  const clean=normalizePath(requested);
+  const importerDir=normalizePath(importer).split("/").slice(0,-1).join("/");
+  const relative=normalizePath(`${importerDir}/${clean}`);
+  const candidates=[clean,relative,clean.replace(/^\//,"")];
+  for(const c of candidates){const exact=files.find(f=>normalizePath(f.path)===c);if(exact)return exact;}
+  const suffix=files.find(f=>normalizePath(f.path).endsWith(`/${clean}`));
+  return suffix;
+}
+
+function pragmaVersions(files:SourceFile[]){
+  const versions:string[]=[];
+  for(const f of files)if(/\.sol$/i.test(f.path)){
+    for(const m of f.content.matchAll(SOLIDITY_PRAGMA))versions.push(m[1].trim());
+  }
+  return [...new Set(versions)];
+}
+
+async function compilerForPragmas(pragmas:string[],logs:any[]){
+  const current=solc.version();
+  const currentMatch=current.match(/^(\d+\.\d+\.\d+)/);
+  const currentVersion=currentMatch?.[1]||"0.8.30";
+  const compatible=(constraint:string,version:string)=>{
+    if(/^=\s*\d+\.\d+\.\d+$/.test(constraint))return constraint.replace(/^=\s*/,"")===version;
+    const majorMinor=constraint.match(/^(?:\^|~|>=|>)?\s*(\d+\.\d+)/)?.[1];
+    return majorMinor?version.startsWith(majorMinor):true;
+  };
+  if(pragmas.every(p=>compatible(p,currentVersion)))return {compiler:solc,version:currentVersion};
+  const exact=pragmas.map(p=>p.match(/(?:^|\s|[<>=^~])([0-9]+\.[0-9]+\.[0-9]+)(?:\s|$)/)?.[1]).find(Boolean);
+  if(!exact){log(logs,"warn",`Detected Solidity pragmas (${pragmas.join(", ")}) that are not directly compatible with bundled solc ${currentVersion}; using source analysis without compiler-specific assumptions.`);return {compiler:null,version:null};}
+  try{
+    const listRes=await fetch("https://binaries.soliditylang.org/bin/list.json");
+    if(!listRes.ok)throw new Error(`compiler index HTTP ${listRes.status}`);
+    const list:any=await listRes.json();
+    const build=list.releases?.[exact];
+    if(!build)throw new Error(`no official solc build for ${exact}`);
+    const remote:any=await new Promise((resolve,reject)=>solc.loadRemoteVersion(build,(err:any,loaded:any)=>err?reject(err):resolve(loaded)));
+    log(logs,"info",`Using Solidity compiler ${exact} selected from repository pragma.`);
+    return {compiler:remote,version:exact};
+  }catch(error){
+    log(logs,"warn",`Could not load Solidity compiler ${exact}; continuing with source-level dependency extraction.`);
+    return {compiler:null,version:null};
+  }
+}
+
+function parseSourceContracts(files:SourceFile[]){
+  const contracts:SourceContract[]=[];
+  for(const f of files){
+    if(!/\.sol$/i.test(f.path))continue;
+    const imports=[...f.content.matchAll(IMPORT_RE)].map(m=>m[1]);
+    for(const m of f.content.matchAll(DECL_RE)){
+      const kind=(m[2]==="interface"?"interface":m[2]==="library"?"library":m[1]?"abstract":"contract") as SourceContract["kind"];
+      const bases=(m[4]||"").split(",").map(x=>x.trim().split(/\s+/)[0]).filter(Boolean);
+      contracts.push({file:f.path,name:m[3],kind,bases,imports,abi:[],bytecode:""});
     }
   }
   return contracts;
 }
 
-function analyzeText(files:{path:string;content:string}[],label:string):Analysis{
+function sourceEvidence(file:string,text:string,index:number,reason:string,value?:string):Evidence{
+  return {file,line:lineOf(text,index),reason,source:"source",...(value?{value}:{})};
+}
+
+function sourceDependencies(files:SourceFile[],contracts:SourceContract[],logs:any[],deps:Dependency[],links:any[],findings:any[]){
+  const contractByName=new Map(contracts.map(c=>[c.name,c]));
+  const depForComponent=new Map<string,Dependency>();
+  const ensureComponent=(name:string,file:string,text:string,index:number,reason:string)=>{
+    const key=`component:${name}`;
+    let d=depForComponent.get(key);
+    if(!d){
+      d=dep(`Source component ${name}`,"external-contract","low",0.95,["source dependency"],[sourceEvidence(file,text,index,reason,name)]);
+      depForComponent.set(key,d); deps.push(d);
+    }
+    return d;
+  };
+  for(const f of files){
+    if(!/\.sol$/i.test(f.path))continue;
+    for(const m of f.content.matchAll(IMPORT_RE)){
+      const requested=m[1],target=resolveImport(f.path,requested,files);
+      const evidence=sourceEvidence(f.path,f.content,m.index??0,`Solidity import dependency: ${requested}`,requested);
+      if(target){
+        const names=contracts.filter(c=>c.file===target.path).map(c=>c.name);
+        const d=ensureComponent(names[0]||target.path,target.path,target.content,0,`Imported source file ${requested}`);
+        d.evidence.push(evidence);
+        links.push({from:"root",to:d.id,relation:"imports",evidence:[evidence]});
+      }else{
+        const d=dep(`Imported package ${requested}`,"external-contract","medium",0.82,["source/package dependency"],[evidence]);
+        deps.push(d);links.push({from:"root",to:d.id,relation:"imports",evidence:[evidence]});
+      }
+    }
+    for(const m of f.content.matchAll(DECL_RE)){
+      const contractName=m[3], bases=(m[4]||"").split(",").map(x=>x.trim().split(/\s+/)[0]).filter(Boolean);
+      for(const base of bases){
+        const baseContract=contractByName.get(base);
+        const d=baseContract?ensureComponent(base,baseContract.file,files.find(x=>x.path===baseContract.file)?.content||"",0,`Inheritance from ${base}`):dep(`Inherited type ${base}`,"external-contract","low",0.88,["inheritance dependency"],[sourceEvidence(f.path,f.content,m.index??0,`Contract ${contractName} inherits from ${base}`,base)]);
+        if(!baseContract)deps.push(d);
+        links.push({from:"root",to:d.id,relation:`inherits (${contractName})`});
+      }
+    }
+  }
+
+  const addPattern=(rx:RegExp,title:string,type:Dependency["type"],severity:Severity,capability:string,confidence:number,reason:string)=>{
+    for(const f of files){if(!/\.sol$/i.test(f.path))continue;const m=f.content.match(rx);if(!m)continue;const e=sourceEvidence(f.path,f.content,m.index??0,reason);
+      deps.push(dep(title,type,severity,confidence,[capability],[e]));
+    }
+  };
+  addPattern(/\b(?:AggregatorV3Interface|latestRoundData\s*\(|Chainlink|\bAggregator\b)/i,"Chainlink-style oracle","oracle","high","price/data dependency",0.95,"Chainlink AggregatorV3/latestRoundData pattern detected.");
+  addPattern(/\b(?:IPyth|Pyth|getPriceUnsafe\s*\(|getPriceNoOlderThan\s*\()/i,"Pyth oracle candidate","oracle","high","price/data dependency",0.93,"Pyth interface/function pattern detected.");
+  addPattern(/\b(?:RedStone|getOracleNumericValueFromTxMsg\s*\()/i,"RedStone oracle candidate","oracle","high","price/data dependency",0.92,"RedStone oracle pattern detected.");
+  addPattern(/\b(?:Tellor|getCurrentValue\s*\(|getDataBefore\s*\()/i,"Tellor oracle candidate","oracle","high","price/data dependency",0.9,"Tellor oracle pattern detected.");
+  addPattern(/\b(?:IUniswapV3Pool|observe\s*\(|OracleLibrary|consult\s*\()/i,"Uniswap V3 TWAP/oracle dependency","oracle","high","on-chain price observation",0.9,"Uniswap V3 pool observation/oracle pattern detected.");
+  addPattern(/\b(?:LayerZero|ILayerZero|Wormhole|IWormhole|CCIP|IAny2EVMMessage|CrossDomainMessenger|OptimismPortal|Arbitrum|IBridge|bridge\s*\()/i,"Cross-chain messaging/bridge dependency","bridge","high","cross-chain dependency",0.9,"Cross-chain bridge or messaging interface pattern detected.");
+  addPattern(/\b(?:IERC1967|ERC1967Upgrade|UUPSUpgradeable|TransparentUpgradeableProxy|BeaconProxy|UpgradeableBeacon|proxiableUUID\s*\()/i,"Upgradeable proxy framework","proxy","high","change implementation",0.92,"EIP-1967/ERC-1822 upgrade framework pattern detected.");
+  addPattern(/\b(?:IDiamondCut|diamondCut\s*\(|facetAddress\s*\(|facetFunctionSelectors\s*\(|facets\s*\()/i,"EIP-2535 Diamond upgrade surface","proxy","critical","change facets/implementation",0.94,"Diamond facet management pattern detected.");
+
+  for(const f of files){
+    if(!/\.sol$/i.test(f.path))continue;
+    for(const m of f.content.matchAll(/bytes32\s+(?:public\s+)?constant\s+([A-Za-z_][A-Za-z0-9_]*_ROLE)\s*=\s*keccak256\s*\(\s*["']([^"']+)["']\s*\)/g)){
+      const e=sourceEvidence(f.path,f.content,m.index??0,`Role identifier ${m[1]} is derived from keccak256(${m[2]}).`,m[1]);
+      deps.push(dep(`Role ${m[1]}`,"admin","high",0.93,["role-based privileged control"],[e]));
+    }
+    for(const m of f.content.matchAll(/\b(I[A-Z][A-Za-z0-9_]+)\s*\(/g)){
+      const interfaceName=m[1];
+      if(!contractByName.has(interfaceName)&&!/^(IERC|IUniswap|IAccess|IBeacon|IProxy|IOracle|IPyth|ITellor|IWETH|IERC)/.test(interfaceName))continue;
+      const d=dep(`Interface ${interfaceName}`,"external-contract","medium",0.9,["typed external dependency"],[sourceEvidence(f.path,f.content,m.index??0,`Typed external interface cast/call ${interfaceName}.`,interfaceName)]);
+      deps.push(d);links.push({from:"root",to:d.id,relation:"interface call"});
+    }
+    const typedReceivers=new Set<string>();
+    for(const tm of f.content.matchAll(/\b(I[A-Z][A-Za-z0-9_]+|[A-Z][A-Za-z0-9_]+)\s+(?:public|private|internal|external|immutable)?\s*([A-Za-z_][A-Za-z0-9_]*)\s*(?:=|;)/g)){
+      typedReceivers.add(tm[2]);
+    }
+    for(const m of f.content.matchAll(/\b([A-Za-z_][A-Za-z0-9_]*)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)\s*\(/g)){
+      const receiver=m[1],method=m[2];
+      if(!typedReceivers.has(receiver))continue;
+      const e=sourceEvidence(f.path,f.content,m.index??0,`Typed external/member call ${receiver}.${method}().`);
+      const d=dep(`External call ${receiver}.${method}()`,"external-contract","medium",0.84,["runtime call surface"],[e]);
+      deps.push(d);
+    }
+  }
+  if(contracts.length)log(logs,"info",`Parsed ${contracts.length} Solidity contracts/interfaces/libraries from source, independent of compiler success.`);
+  return contracts;
+}
+
+async function sourceAnalyze(files:SourceFile[],logs:any[]){
+  const sources:any={};for(const f of files)if(f.path.endsWith(".sol"))sources[f.path]={content:f.content};
+  const contracts=parseSourceContracts(files);
+  const pragmas=pragmaVersions(files);
+  let compiled:any={};let compilerVersion:string|null=null;
+  if(Object.keys(sources).length){
+    log(logs,"info",`Compiling ${Object.keys(sources).length} Solidity source files; detected pragmas: ${pragmas.join(", ")||"none"}`);
+    const selected=await compilerForPragmas(pragmas,logs);compilerVersion=selected.version;
+    if(selected.compiler){
+      const input={language:"Solidity",sources,settings:{outputSelection:{"*":{"*":["abi","metadata","evm.deployedBytecode.object","storageLayout"]}}}};
+      try{compiled=JSON.parse(selected.compiler.compile(JSON.stringify(input),{import:(p:string)=>{const f=resolveImport("",p,files);return f?{contents:f.content}:{error:"not found"};}}));}
+      catch{log(logs,"warn","Compiler invocation failed; source dependency extraction remains available.");}
+      const errors=(compiled.errors||[]).filter((e:any)=>e.severity==="error");
+      if(errors.length)log(logs,"warn",`${errors.length} compiler errors; source/import/inheritance analysis was retained.`);
+    }
+  }
+  for(const [file,cs] of Object.entries(compiled.contracts||{}))for(const [name,c] of Object.entries(cs as any)){
+    const existing=contracts.find(x=>x.file===file&&x.name===name);
+    if(existing){existing.abi=(c as any).abi||[];existing.bytecode=(c as any).evm?.deployedBytecode?.object||"";existing.storageLayout=(c as any).storageLayout;}
+    else contracts.push({file,name,kind:"contract",bases:[],imports:[],abi:(c as any).abi||[],bytecode:(c as any).evm?.deployedBytecode?.object||"",storageLayout:(c as any).storageLayout});
+  }
+  return {contracts,compilerVersion,compilerErrors:(compiled.errors||[]).filter((e:any)=>e.severity==="error").length};
+}
+
+async function analyzeText(files:{path:string;content:string}[],label:string):Promise<Analysis>{
   const started=Date.now(),logs:any[]=[]; log(logs,"info","Input accepted");
-  const contracts=sourceAnalyze(files,logs); const deps:Dependency[]=[]; const findings:any[]=[];
+  const sourceResult=await sourceAnalyze(files,logs); const contracts=sourceResult.contracts; const deps:Dependency[]=[]; const findings:any[]=[]; const links:any[]=[];
+  sourceDependencies(files,contracts,logs,deps,links,findings);
   const addresses=new Set<string>();
   for(const f of files){
     const text=f.content, lower=text.toLowerCase();
@@ -98,14 +257,14 @@ function analyzeText(files:{path:string;content:string}[],label:string):Analysis
     if(/\blatestRoundData\(\)/.test(joined))deps.push(dep("Oracle interface","oracle","high",0.9,["price data"],[{file:c.file,reason:"latestRoundData() in compiled ABI",source:"abi"}]));
     if(/\bproxiableUUID\(\)/.test(joined))deps.push(dep("UUPS upgrade surface","proxy","critical",0.94,["change implementation"],[{file:c.file,reason:"proxiableUUID() in ABI indicates UUPS-style compatibility.",source:"abi"}]));
   }
-  const final=dedupe(deps); const g=graph(label,final);
+  const final=dedupe(deps); const g=graph(label,final,links);
   const durationMs=Date.now()-started;
   const summary={dependencyCount:final.length,critical:final.filter(x=>x.severity==="critical").length,high:final.filter(x=>x.severity==="high").length,medium:final.filter(x=>x.severity==="medium").length,low:final.filter(x=>x.severity==="low").length,privilegedControls:final.filter(x=>["admin","owner","multisig","proxy"].includes(x.type)).length,upgradeable:final.some(x=>x.type==="proxy")};
   log(logs,"success",`Analysis complete: ${final.length} dependencies, ${findings.length} findings`);
-  return {id:id(),inputType:"zip",inputLabel:label,createdAt:now(),durationMs,status:"completed",root:{name:label},summary,dependencies:final,nodes:g.nodes,edges:g.edges,findings,logs,metadata:{contracts:contracts.length,solidityFiles:files.filter(f=>f.path.endsWith(".sol")).length}};
+  return {id:id(),inputType:"zip",inputLabel:label,createdAt:now(),durationMs,status:"completed",root:{name:label},summary,dependencies:final,nodes:g.nodes,edges:g.edges,findings,logs,metadata:{contracts:contracts.length,solidityFiles:files.filter(f=>f.path.endsWith(".sol")).length,compilerVersion:sourceResult.compilerVersion,compilerErrors:sourceResult.compilerErrors,sourceAnalysis:"imports + inheritance + typed external interfaces + compiler-backed ABI analysis"}};
 }
 
-export function analyzeFiles(files:{path:string;content:string}[],label:string){return analyzeText(files,label);}
+export async function analyzeFiles(files:{path:string;content:string}[],label:string){return analyzeText(files,label);}
 
 export async function analyzeAddress(address:string,network:Network):Promise<Analysis>{
   const started=Date.now(),logs:any[]=[]; log(logs,"info",`Connecting to ${network}`);
@@ -185,7 +344,7 @@ export async function analyzeAddress(address:string,network:Network):Promise<Ana
 export async function analyzeGithub(owner:string,repo:string):Promise<Analysis>{
   const files=await githubRepoFiles(owner,repo);
   if(!files.length)throw new Error("No Solidity/JSON files could be read from repository");
-  const a=analyzeText(files,`${owner}/${repo}`); a.inputType="github";
+  const a=await analyzeText(files,`${owner}/${repo}`); a.inputType="github";
   a.metadata={...a.metadata,github:{owner,repo},filesRead:files.length};
   return a;
 }

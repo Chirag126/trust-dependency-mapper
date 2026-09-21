@@ -2,14 +2,23 @@ import { ethers } from "ethers";
 import { config } from "./config";
 import { withTimeout } from "./chain";
 
+function eip1967Slot(label:string){
+  const hash=BigInt(ethers.keccak256(ethers.toUtf8Bytes(label)));
+  return ethers.toBeHex(hash-1n,32);
+}
+
 export const PROXY_SLOTS = {
-  eip1967Implementation:"0x360894A13BA1A3210667C828492DB98DCA3E2077",
-  eip1967Admin:"0xb53127684a568b3173ae13b9f8a6016cc3d4b1d",
-  eip1967Beacon:"0xa3f0ad74e5423aebfd80d3ef4346578335a9a72aeaee3d7e5a5d0c6b5d5f5f5",
-  uupsProxiable:"0xc5f16f0fc9b2f8f4f1d4f7d9f4e2f7e0e6b0f0e9b7b1a8c7f1b5d5d3f2a7f1a"
+  eip1967Implementation:eip1967Slot("eip1967.proxy.implementation"),
+  eip1967Admin:eip1967Slot("eip1967.proxy.admin"),
+  eip1967Beacon:eip1967Slot("eip1967.proxy.beacon")
 };
-// Exact known EIP-1967 implementation/admin/beacon slots. UUPS is identified by proxiableUUID() below;
-// the historical constant above is intentionally not treated as authoritative.
+
+export const PROXY_STANDARDS = {
+  eip1967:"EIP-1967 storage slots",
+  erc1822:"ERC-1822 / UUPS proxiableUUID()",
+  eip1167:"EIP-1167 minimal proxy / clone",
+  eip2535:"EIP-2535 Diamond facets"
+};
 
 export async function readProxySlots(provider:ethers.JsonRpcProvider,address:string){
   const out:Record<string,string>={};

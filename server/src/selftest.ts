@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { analyzeFiles } from "./analyzer";
 
+async function main(){
 const source=`
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -13,7 +14,7 @@ contract Test {
  function upgradeTo(address x) external { require(msg.sender==owner); (bool ok,)=x.delegatecall(""); require(ok); }
 }
 `;
-const a=analyzeFiles([{path:"Test.sol",content:source}],"self-test");
+const a=await analyzeFiles([{path:"Test.sol",content:source}],"self-test");
 assert.equal(a.status,"completed");
 assert.ok(a.dependencies.some(d=>d.type==="oracle"),"oracle dependency missing");
 assert.ok(a.dependencies.some(d=>d.type==="owner"),"owner dependency missing");
@@ -22,3 +23,5 @@ assert.ok(a.summary.upgradeable,"upgradeable summary missing");
 assert.ok(a.findings.some(f=>f.title.includes("Delegatecall")),"delegatecall finding missing");
 assert.ok(a.logs.some(l=>l.level==="success"),"completion log missing");
 console.log("TDM self-test: PASS");
+}
+main().catch(error=>{console.error(error);process.exit(1);});

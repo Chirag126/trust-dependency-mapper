@@ -61,7 +61,7 @@ function extractZip(buffer:Buffer){
 app.post("/api/analyze/zip",upload.single("project"),async(req,res)=>{
   if(!req.file)return res.status(400).json({error:"Upload a .zip Solidity project"});
   try{const files=extractZip(req.file.buffer);if(!files.some(f=>f.path.endsWith(".sol")))return res.status(400).json({error:"ZIP contains no Solidity files"});
-    const a=analyzeFiles(files,req.file.originalname);saveAnalysis(a,session(req));res.json(a);
+    const a=await analyzeFiles(files,req.file.originalname);saveAnalysis(a,session(req));res.json(a);
   }catch(e:any){res.status(400).json({error:e.message||"ZIP analysis failed"});}
 });
 app.get("/api/analyses",(req,res)=>res.json(listAnalyses(Math.min(Number(req.query.limit||50),200))));
