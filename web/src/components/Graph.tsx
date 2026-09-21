@@ -10,7 +10,13 @@ export default function Graph({analysis,onSelect}:{analysis:any,onSelect:(id:str
     const width=900,height=520;
     const g=svg.append("g");
     const nodes=analysis.nodes.map((n:any)=>({...n}));
-    const edges=analysis.edges.map((e:any)=>({...e}));
+    const nodeIds=new Set(nodes.map((n:any)=>n.id));
+    // Ignore stale/deduped graph links instead of letting d3 throw and unmount
+    // the entire results view.
+    const edges=analysis.edges
+      .filter((e:any)=>nodeIds.has(typeof e.source==="string"?e.source:e.source?.id)
+        && nodeIds.has(typeof e.target==="string"?e.target:e.target?.id))
+      .map((e:any)=>({...e}));
     const sim=d3.forceSimulation(nodes)
       .force("link",d3.forceLink(edges).id((d:any)=>d.id).distance(125))
       .force("charge",d3.forceManyBody().strength(-420))
