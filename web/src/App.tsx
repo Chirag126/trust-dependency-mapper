@@ -87,6 +87,37 @@ export default function App(){
  const loadWatch=async()=>{try{setWatch(await api<any[]>("/api/watchlist"))}catch{}};
  useEffect(()=>{loadHistory();loadWatch()},[]);
  async function run(){
+   setError("");
+
+   if (mode === "address") {
+     const value = address.trim();
+     if (!value) {
+       setError("Please enter a contract address before analyzing.");
+       return;
+     }
+     if (!/^0x[a-fA-F0-9]{40}$/.test(value)) {
+       setError("Enter a valid  Ethereum contract address (0x followed by 40 hexadecimal characters).");
+       return;
+     }
+   }
+
+   if (mode === "github") {
+     const value = github.trim();
+     if (!value) {
+       setError("Please enter a GitHub repository URL.");
+       return;
+     }
+     if (!/^https:\/\/github\.com\/[^/]+\/[^/]+\/?$/.test(value)) {
+       setError("Enter a valid GitHub repository URL, such as https://github.com/owner/repository.");
+       return;
+     }
+   }
+
+   if (mode === "zip" && !file) {
+     setError("Please choose a Solidity ZIP file before analyzing.");
+     return;
+   }
+
    setBusy(true);setError("");setSelected(null);setBlast(null);
    try{
     let a:Analysis;
@@ -167,4 +198,5 @@ function Stat({n,l,bad}:{n:any;l:string;bad?:boolean}){return <div className="st
 function CompareSection({title,items}:{title:string;items:any[]}){return <div className="diff-section"><h3>{title} <small>{items.length}</small></h3>{items.map(x=><div className="diffrow" key={x.id}><span className={sev(x.severity)}>{x.severity}</span><b>{x.name}</b><span>{x.type}</span></div>)}</div>}
 function Bar({label,count,total}:{label:string;count:number;total:number}){return <div className="barrow"><span>{label}</span><div><i style={{width:`${total?Math.min(100,count/total*100):0}%`}}/></div><b>{count}</b></div>}
 function LoginModal({onLogin,onClose}:{onLogin:(u:string,p:string)=>void;onClose:()=>void}){const[u,setU]=useState(""),[p,setP]=useState(""),[busy,setBusy]=useState(false),[e,setE]=useState("");return <div className="modal-bg"><div className="modal"><div className="eyebrow">ADMIN ACCESS</div><h2>Sign in</h2><p>Private product analytics and audit logs.</p><input placeholder="Username" value={u} onChange={x=>setU(x.target.value)}/><input placeholder="Password" type="password" value={p} onChange={x=>setP(x.target.value)}/>{e&&<div className="error">{e}</div>}<div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={async()=>{setBusy(true);try{await onLogin(u,p)}catch(e:any){setE(e.message)}finally{setBusy(false)}}}><LogIn size={15}/>Sign in</button></div></div></div>}
+
 
