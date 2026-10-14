@@ -24,6 +24,19 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: con
 function session(req: express.Request) {
   return safeSession(req.header("x-anonymous-session") || "anon");
 }
+
+function analysisErrorStatus(error: unknown): number {
+  const message = error instanceof Error ? error.message : String(error);
+
+  if (/rate.?limit|too many requests|\b429\b/i.test(message)) return 429;
+
+  if (/timed out|RPC is not configured|network error|network unavailable|ECONNRESET|ECONNREFUSED|ENOTFOUND|fetch failed|SERVER_ERROR|NETWORK_ERROR|ETIMEDOUT|service unavailable/i.test(message)) {
+    return 503;
+  }
+
+  return 400;
+}
+
 async function admin(req: express.Request) {
   return requireAdmin(req.header("authorization")?.replace(/^Bearer\s+/i, ""));
 }
