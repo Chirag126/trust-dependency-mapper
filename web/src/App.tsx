@@ -1,4 +1,4 @@
-import React,{useEffect,useMemo,useState} from "react";
+﻿import React,{useEffect,useMemo,useState} from "react";
 import { Search, GitBranch, Upload, ShieldCheck, Activity, History, GitCompareArrows, Eye, AlertTriangle, CheckCircle2, Network, RefreshCw, Radar, FileDiff, LogIn } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "./api";
@@ -15,10 +15,75 @@ export default function App(){
  const [admin,setAdmin]=useState<any>(null),[audit,setAudit]=useState<any[]>([]),[loginOpen,setLoginOpen]=useState(false),[watch,setWatch]=useState<any[]>([]);
  const [historyError,setHistoryError]=useState(""),[compareError,setCompareError]=useState("");
 
- const loadHistory=async()=>{
-   try { setHistory(await api<Analysis[]>("/api/analyses?limit=100")); setHistoryError(""); }
-   catch(e:any) { setHistoryError(e?.message || "Could not load analysis history."); }
- };
+ const loadHistory = async () => {
+  try {
+    const response = await api<unknown>("/api/analyses?limit=100");
+
+    const rows: any[] = Array.isArray(response)
+      ? response
+      : Array.isArray((response as any)?.analyses)
+        ? (response as any).analyses
+        : [];
+
+    const safeRows = rows
+      .filter((item: any) =>
+        item &&
+        typeof item === "object" &&
+        typeof item.id === "string"
+      )
+      .map((item: any) => {
+        const dependencies = Array.isArray(item.dependencies)
+          ? item.dependencies
+          : [];
+
+        const findings = Array.isArray(item.findings)
+          ? item.findings
+          : [];
+
+        const summary =
+          item.summary && typeof item.summary === "object"
+            ? item.summary
+            : {};
+
+        return {
+          ...item,
+          inputLabel:
+            typeof item.inputLabel === "string"
+              ? item.inputLabel
+              : "Unnamed analysis",
+          inputType:
+            typeof item.inputType === "string"
+              ? item.inputType
+              : "unknown",
+          createdAt: item.createdAt || new Date().toISOString(),
+          summary: {
+            ...summary,
+            dependencyCount: Number.isFinite(Number(summary.dependencyCount))
+              ? Number(summary.dependencyCount)
+              : dependencies.length,
+            critical: Number.isFinite(Number(summary.critical))
+              ? Number(summary.critical)
+              : findings.filter((f: any) => f?.severity === "critical").length,
+            high: Number.isFinite(Number(summary.high))
+              ? Number(summary.high)
+              : findings.filter((f: any) => f?.severity === "high").length
+          }
+        };
+      });
+
+    setHistory(safeRows as Analysis[]);
+    setHistoryError(
+      !Array.isArray(response) && safeRows.length === 0
+        ? "Unexpected history response from the API. Check the backend logs."
+        : ""
+    );
+  } catch (e: any) {
+    setHistory([]);
+    setHistoryError(
+      e?.message || "Could not load analysis history."
+    );
+  }
+};
  const loadWatch=async()=>{try{setWatch(await api<any[]>("/api/watchlist"))}catch{}};
  useEffect(()=>{loadHistory();loadWatch()},[]);
  async function run(){
@@ -69,30 +134,30 @@ export default function App(){
       {mode==="address"&&<div className="fields"><input placeholder="0x contract address" value={address} onChange={e=>setAddress(e.target.value)}/><select value={network} onChange={e=>setNetwork(e.target.value)}>{["ethereum","sepolia","arbitrum","base"].map(n=><option key={n}>{n}</option>)}</select></div>}
       {mode==="github"&&<input placeholder="https://github.com/owner/repository" value={github} onChange={e=>setGithub(e.target.value)}/>}
       {mode==="zip"&&<label className="drop"><Upload size={25}/><span>{file?file.name:"Choose a .zip Solidity project"}</span><input type="file" accept=".zip" onChange={e=>setFile(e.target.files?.[0]||null)}/></label>}
-      {error&&<div className="error"><AlertTriangle size={16}/>{error}</div>}<button className="primary" onClick={run} disabled={busy}>{busy?<><RefreshCw className="spin" size={17}/>Analyzing…</>:<>Analyze trust surface <span>→</span></>}</button>
+      {error&&<div className="error"><AlertTriangle size={16}/>{error}</div>}<button className="primary" onClick={run} disabled={busy}>{busy?<><RefreshCw className="spin" size={17}/>Analyzingâ€¦</>:<>Analyze trust surface <span>â†’</span></>}</button>
      </div>
      <div className="feature-grid">{([ ["Evidence-backed dependency map",ShieldCheck], ["Runtime trace signals",Radar], ["Upgrade/trust diff",FileDiff], ["Continuous watchlist",Eye] ] as Array<[string,LucideIcon]>).map(([x,I])=><div className="mini" key={x as string}><I size={16}/><span>{x as string}</span></div>)}</div>
     </section>}
 
-    {tab==="results"&&!analysis&&<section className="page-empty"><div className="empty-state"><ShieldCheck size={34}/><h2>No analysis results yet</h2><p>Run a contract, GitHub repository, or ZIP analysis first. Your results will appear here.</p><button className="primary" onClick={()=>setTab("analyze")}>Go to Analyze <span>→</span></button></div></section>}
-    {tab==="results"&&analysis&&<section><div className="section-head"><div><div className="eyebrow">ANALYSIS COMPLETE</div><h2>{analysis.inputLabel}</h2><p>{analysis.network||analysis.inputType} · {new Date(analysis.createdAt).toLocaleString()} · {analysis.durationMs} ms</p></div><div className="actions"><button onClick={saveWatch}><Eye size={15}/> Watch</button><button onClick={()=>setTab("analyze")}>New analysis</button></div></div>
+    {tab==="results"&&!analysis&&<section className="page-empty"><div className="empty-state"><ShieldCheck size={34}/><h2>No analysis results yet</h2><p>Run a contract, GitHub repository, or ZIP analysis first. Your results will appear here.</p><button className="primary" onClick={()=>setTab("analyze")}>Go to Analyze <span>â†’</span></button></div></section>}
+    {tab==="results"&&analysis&&<section><div className="section-head"><div><div className="eyebrow">ANALYSIS COMPLETE</div><h2>{analysis.inputLabel}</h2><p>{analysis.network||analysis.inputType} Â· {new Date(analysis.createdAt).toLocaleString()} Â· {analysis.durationMs} ms</p></div><div className="actions"><button onClick={saveWatch}><Eye size={15}/> Watch</button><button onClick={()=>setTab("analyze")}>New analysis</button></div></div>
      <div className="stats"><Stat n={analysis.summary.dependencyCount} l="Dependencies"/><Stat n={analysis.summary.critical} l="Critical" bad/><Stat n={analysis.summary.high} l="High" bad/><Stat n={analysis.summary.privilegedControls} l="Privileged controls"/><Stat n={analysis.summary.upgradeable?"YES":"NO"} l="Upgradeable"/></div>
-     <div className="result-grid"><div className="panel graph-panel"><div className="panel-title"><span>Trust dependency graph</span><small>Drag • zoom • click</small></div><Graph analysis={analysis} onSelect={selectDependency}/></div>
-      <div className="panel inspector">{dep?<><div className="panel-title"><span>Dependency detail</span><button onClick={()=>setSelected(null)}>×</button></div><h3>{dep.name}</h3><div className="tag-row"><span className={sev(dep.severity)}>{dep.severity}</span><span className="tag">{dep.type}</span><span className="tag">{Math.round(dep.confidence*100)}% confidence</span></div><h4>Capabilities</h4><ul>{dep.capabilities.map(x=><li key={x}>{x}</li>)}</ul><h4>Evidence</h4>{dep.evidence.map((e,i)=><div className="evidence" key={i}><b>{e.source}</b><span>{e.reason}</span>{e.function&&<code>{e.function}</code>}{e.value&&<code>{e.value}</code>}{e.file&&<code>{e.file}{e.line?`:${e.line}`:""}</code>}</div>)}{blast&&<><h4>Blast radius</h4><div className="blast"><strong>{blast.reachableNodes.length}</strong><span>reachable graph nodes</span><p>{blast.explanation}</p></div></>}</>:<div className="empty"><Network size={28}/><b>Select a node</b><span>Inspect evidence and the discovered blast radius.</span></div>}</div>
+     <div className="result-grid"><div className="panel graph-panel"><div className="panel-title"><span>Trust dependency graph</span><small>Drag â€¢ zoom â€¢ click</small></div><Graph analysis={analysis} onSelect={selectDependency}/></div>
+      <div className="panel inspector">{dep?<><div className="panel-title"><span>Dependency detail</span><button onClick={()=>setSelected(null)}>Ã—</button></div><h3>{dep.name}</h3><div className="tag-row"><span className={sev(dep.severity)}>{dep.severity}</span><span className="tag">{dep.type}</span><span className="tag">{Math.round(dep.confidence*100)}% confidence</span></div><h4>Capabilities</h4><ul>{dep.capabilities.map(x=><li key={x}>{x}</li>)}</ul><h4>Evidence</h4>{dep.evidence.map((e,i)=><div className="evidence" key={i}><b>{e.source}</b><span>{e.reason}</span>{e.function&&<code>{e.function}</code>}{e.value&&<code>{e.value}</code>}{e.file&&<code>{e.file}{e.line?`:${e.line}`:""}</code>}</div>)}{blast&&<><h4>Blast radius</h4><div className="blast"><strong>{blast.reachableNodes.length}</strong><span>reachable graph nodes</span><p>{blast.explanation}</p></div></>}</>:<div className="empty"><Network size={28}/><b>Select a node</b><span>Inspect evidence and the discovered blast radius.</span></div>}</div>
      </div>
-     <div className="lower-grid"><div className="panel"><div className="panel-title">Findings <small>{analysis.findings.length}</small></div>{analysis.findings.length?analysis.findings.map(f=><div className="finding" key={f.id}><span className={sev(f.severity)}>{f.severity}</span><div><b>{f.title}</b><p>{f.description}</p><small>{Math.round(f.confidence*100)}% confidence · {f.evidence.map((e:any)=>e.source).join(", ")}</small></div></div>):<div className="empty compact"><CheckCircle2/><span>No heuristic findings from available evidence.</span></div>}</div>
+     <div className="lower-grid"><div className="panel"><div className="panel-title">Findings <small>{analysis.findings.length}</small></div>{analysis.findings.length?analysis.findings.map(f=><div className="finding" key={f.id}><span className={sev(f.severity)}>{f.severity}</span><div><b>{f.title}</b><p>{f.description}</p><small>{Math.round(f.confidence*100)}% confidence Â· {f.evidence.map((e:any)=>e.source).join(", ")}</small></div></div>):<div className="empty compact"><CheckCircle2/><span>No heuristic findings from available evidence.</span></div>}</div>
       <div className="panel"><div className="panel-title">Analysis log <small>run trace</small></div><div className="logs">{analysis.logs.map((l,i)=><div key={i}><time>{new Date(l.ts).toLocaleTimeString()}</time><span className={`dot ${l.level}`}></span><span>{l.message}</span></div>)}</div></div></div>
      <div className="panel details"><div className="panel-title">Engine metadata <small>what the engine actually inspected</small></div><div className="meta-grid">{Object.entries(analysis.metadata||{}).map(([k,v])=><div key={k}><span>{k}</span><code>{typeof v==="object"?JSON.stringify(v):String(v)}</code></div>)}</div></div>
     </section>}
 
     {tab==="history"&&<section><div className="section-head"><div><div className="eyebrow">HISTORY</div><h2>Previous analyses</h2><p>Server-side history for this anonymous browser session.</p></div></div>{historyError&&<div className="error page-error"><AlertTriangle size={16}/>{historyError}<button onClick={loadHistory}>Retry</button></div>}
-     <div className="history-list">{history.map(a=><button key={a.id} onClick={()=>{setAnalysis(a);setTab("results")}}><div><b>{a.inputLabel}</b><span>{a.inputType} {a.network?`· ${a.network}`:""} · {new Date(a.createdAt).toLocaleString()}</span></div><div><strong>{a.summary.dependencyCount}</strong><span>dependencies</span></div><div><strong className="red">{a.summary.critical+a.summary.high}</strong><span>critical/high</span></div><span>→</span></button>)}</div>
+     <div className="history-list">{history.map(a=><button key={a.id} onClick={()=>{setAnalysis(a);setTab("results")}}><div><b>{a.inputLabel}</b><span>{a.inputType} {a.network?`Â· ${a.network}`:""} Â· {new Date(a.createdAt).toLocaleString()}</span></div><div><strong>{a.summary.dependencyCount}</strong><span>dependencies</span></div><div><strong className="red">{a.summary.critical+a.summary.high}</strong><span>critical/high</span></div><span>â†’</span></button>)}</div>
      {!history.length&&!historyError&&<div className="empty-state inline-empty"><History size={28}/><h3>No saved analyses yet</h3><p>Complete an analysis and it will appear here for this browser session.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}<div className="panel watch-panel"><div className="panel-title">Watchlist <small>{watch.length}</small></div>{watch.length?watch.map(w=><div className="watch-row" key={w.id}><b>{w.name}</b><span>{w.network||w.input_type}</span><span>{w.last_check_at?new Date(w.last_check_at).toLocaleString():"Not checked yet"}</span></div>):<div className="empty compact">Save an address analysis with Watch to track trust changes.</div>}</div></section>}
 
-    {tab==="compare"&&<section><div className="section-head"><div><div className="eyebrow">TRUST DIFF</div><h2>Compare two analyses</h2><p>Compare dependency identity, severity, confidence and capabilities.</p></div></div>{history.length>=2?<div className="compare-picker"><select id="before" defaultValue={history[0]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} · {new Date(a.createdAt).toLocaleString()}</option>)}</select><span>→</span><select id="after" defaultValue={history[1]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} · {new Date(a.createdAt).toLocaleString()}</option>)}</select><button className="primary" onClick={compareNow}>Compare</button></div>:<div className="empty-state inline-empty"><GitCompareArrows size={28}/><h3>Two analyses are required</h3><p>Analyze a contract or repository twice (or analyze two different targets) to compare dependency changes.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}
-     {compareError&&<div className="error page-error"><AlertTriangle size={16}/>{compareError}</div>}{compare&&<div className="panel compare"><div className="stats"><Stat n={compare.summary.added} l="Added"/><Stat n={compare.summary.removed} l="Removed"/><Stat n={compare.summary.changed} l="Changed"/><Stat n={compare.summary.riskDelta>0?`+${compare.summary.riskDelta}`:compare.summary.riskDelta} l="Severity-weight delta" bad={compare.summary.riskDelta>0}/></div><CompareSection title="Added" items={compare.added}/><CompareSection title="Removed" items={compare.removed}/>{compare.changed.map((x:any)=><div className="diffrow" key={x.after.id}><span className="tag">CHANGED</span><b>{x.after.name}</b><span>{x.before.severity} → {x.after.severity}</span></div>)}</div>}</section>}
+    {tab==="compare"&&<section><div className="section-head"><div><div className="eyebrow">TRUST DIFF</div><h2>Compare two analyses</h2><p>Compare dependency identity, severity, confidence and capabilities.</p></div></div>{history.length>=2?<div className="compare-picker"><select id="before" defaultValue={history[0]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} Â· {new Date(a.createdAt).toLocaleString()}</option>)}</select><span>â†’</span><select id="after" defaultValue={history[1]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} Â· {new Date(a.createdAt).toLocaleString()}</option>)}</select><button className="primary" onClick={compareNow}>Compare</button></div>:<div className="empty-state inline-empty"><GitCompareArrows size={28}/><h3>Two analyses are required</h3><p>Analyze a contract or repository twice (or analyze two different targets) to compare dependency changes.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}
+     {compareError&&<div className="error page-error"><AlertTriangle size={16}/>{compareError}</div>}{compare&&<div className="panel compare"><div className="stats"><Stat n={compare.summary.added} l="Added"/><Stat n={compare.summary.removed} l="Removed"/><Stat n={compare.summary.changed} l="Changed"/><Stat n={compare.summary.riskDelta>0?`+${compare.summary.riskDelta}`:compare.summary.riskDelta} l="Severity-weight delta" bad={compare.summary.riskDelta>0}/></div><CompareSection title="Added" items={compare.added}/><CompareSection title="Removed" items={compare.removed}/>{compare.changed.map((x:any)=><div className="diffrow" key={x.after.id}><span className="tag">CHANGED</span><b>{x.after.name}</b><span>{x.before.severity} â†’ {x.after.severity}</span></div>)}</div>}</section>}
 
-    {tab==="admin"&&admin&&<section><div className="section-head"><div><div className="eyebrow">PRIVATE ADMIN</div><h2>Product analytics</h2><p>Authenticated operational dashboard. User identity is anonymous to this layer.</p></div></div><div className="stats"><Stat n={admin.uniqueUsers} l="Unique anonymous users"/><Stat n={admin.totalAnalyses} l="Total analyses"/><Stat n={admin.last24h} l="Analyses / 24h"/><Stat n={admin.last7d} l="Analyses / 7d"/><Stat n={`${admin.avgDurationMs}ms`} l="Avg analysis time"/></div><div className="panel analytics"><h3>Usage by input</h3>{admin.byInput.map((x:any)=><Bar key={x.type} label={x.type} count={x.count} total={admin.totalAnalyses}/>)}<h3>Usage by network</h3>{admin.byNetwork.map((x:any)=><Bar key={x.network} label={x.network} count={x.count} total={admin.totalAnalyses}/>)}</div><div className="panel"><div className="panel-title">Admin audit events <small>latest 500</small></div><div className="logs">{audit.map((x,i)=><div key={i}><time>{new Date(x.created_at).toLocaleString()}</time><span className="dot info"></span><span>{x.event} · {x.input_type||""} {x.network||""}</span></div>)}</div></div></section>}
+    {tab==="admin"&&admin&&<section><div className="section-head"><div><div className="eyebrow">PRIVATE ADMIN</div><h2>Product analytics</h2><p>Authenticated operational dashboard. User identity is anonymous to this layer.</p></div></div><div className="stats"><Stat n={admin.uniqueUsers} l="Unique anonymous users"/><Stat n={admin.totalAnalyses} l="Total analyses"/><Stat n={admin.last24h} l="Analyses / 24h"/><Stat n={admin.last7d} l="Analyses / 7d"/><Stat n={`${admin.avgDurationMs}ms`} l="Avg analysis time"/></div><div className="panel analytics"><h3>Usage by input</h3>{admin.byInput.map((x:any)=><Bar key={x.type} label={x.type} count={x.count} total={admin.totalAnalyses}/>)}<h3>Usage by network</h3>{admin.byNetwork.map((x:any)=><Bar key={x.network} label={x.network} count={x.count} total={admin.totalAnalyses}/>)}</div><div className="panel"><div className="panel-title">Admin audit events <small>latest 500</small></div><div className="logs">{audit.map((x,i)=><div key={i}><time>{new Date(x.created_at).toLocaleString()}</time><span className="dot info"></span><span>{x.event} Â· {x.input_type||""} {x.network||""}</span></div>)}</div></div></section>}
    </main>
   </div>
   {loginOpen&&<LoginModal onLogin={login} onClose={()=>setLoginOpen(false)}/>}
@@ -102,3 +167,4 @@ function Stat({n,l,bad}:{n:any;l:string;bad?:boolean}){return <div className="st
 function CompareSection({title,items}:{title:string;items:any[]}){return <div className="diff-section"><h3>{title} <small>{items.length}</small></h3>{items.map(x=><div className="diffrow" key={x.id}><span className={sev(x.severity)}>{x.severity}</span><b>{x.name}</b><span>{x.type}</span></div>)}</div>}
 function Bar({label,count,total}:{label:string;count:number;total:number}){return <div className="barrow"><span>{label}</span><div><i style={{width:`${total?Math.min(100,count/total*100):0}%`}}/></div><b>{count}</b></div>}
 function LoginModal({onLogin,onClose}:{onLogin:(u:string,p:string)=>void;onClose:()=>void}){const[u,setU]=useState(""),[p,setP]=useState(""),[busy,setBusy]=useState(false),[e,setE]=useState("");return <div className="modal-bg"><div className="modal"><div className="eyebrow">ADMIN ACCESS</div><h2>Sign in</h2><p>Private product analytics and audit logs.</p><input placeholder="Username" value={u} onChange={x=>setU(x.target.value)}/><input placeholder="Password" type="password" value={p} onChange={x=>setP(x.target.value)}/>{e&&<div className="error">{e}</div>}<div className="actions"><button onClick={onClose}>Cancel</button><button className="primary" disabled={busy} onClick={async()=>{setBusy(true);try{await onLogin(u,p)}catch(e:any){setE(e.message)}finally{setBusy(false)}}}><LogIn size={15}/>Sign in</button></div></div></div>}
+
