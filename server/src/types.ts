@@ -54,10 +54,10 @@ export interface Analysis {
   inputType: InputType;
   inputLabel: string;
   network?: string;
-  root: { address?: string; name: string };
+  root: { address?: string; name: string; };
   createdAt: string;
   durationMs: number;
-  status: "completed" | "failed";
+  status: "completed" | "partial" | "failed";
   summary: {
     dependencyCount: number;
     critical: number;
@@ -78,6 +78,6 @@ export interface Analysis {
     evidence: Evidence[];
     confidence: number;
   }[];
-  logs: { ts: string; level: "info" | "success" | "warn" | "error"; message: string }[];
+  logs: { ts: string; level: "info" | "success" | "warn" | "error"; message: string; }[];
   metadata: Record<string, unknown>;
 }

@@ -20,7 +20,11 @@ export function now() {
 
 export function normalizeGithub(raw: string) {
   let u: URL;
-  try { u = new URL(raw); } catch { throw new Error("Invalid GitHub URL"); }
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error("Invalid GitHub URL");
+  }
   if (u.hostname !== "github.com" && u.hostname !== "www.github.com") throw new Error("Only github.com repositories are supported");
   const parts = u.pathname.split("/").filter(Boolean);
   if (parts.length < 2) throw new Error("GitHub URL must look like https://github.com/owner/repository");
