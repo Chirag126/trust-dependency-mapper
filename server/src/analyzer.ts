@@ -1,4 +1,4 @@
-import { ethers } from "ethers";
+﻿import { ethers } from "ethers";
 import solc from "solc";
 import { Analysis, Dependency, Evidence, Severity, GraphNode, GraphEdge } from "./types";
 import { id, now, severityRank } from "./utils";
@@ -128,7 +128,7 @@ async function compilerForPragmas(pragmas: string[], logs: any[]) {
     if (!build) throw new Error(`official release list has no build for ${exact}`);
     const remote: any = await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => reject(new Error("compiler download timed out after 20s")), 20_000);
-      solc.loadRemoteVersion(build, (err: any, loaded: any) => {
+      solc.loadRemoteVersion(build.replace(/^soljson-/, "").replace(/\.js$/, ""), (err: any, loaded: any) => {
         clearTimeout(timeout);
         if (err) reject(err); else resolve(loaded);
       });
@@ -325,7 +325,7 @@ async function analyzeText(files: { path: string; content: string; }[], label: s
         severity = "high";
         caps = ["privileged control"];
       }
-      deps.push(dep(`Address ${address.slice(0, 6)}…${address.slice(-4)}`, type, severity, 0.76, caps, [{ file: f.path, reason: "Address literal found in source near integration/trust-sensitive context.", source: "source", value: address }], address));
+      deps.push(dep(`Address ${address.slice(0, 6)}â€¦${address.slice(-4)}`, type, severity, 0.76, caps, [{ file: f.path, reason: "Address literal found in source near integration/trust-sensitive context.", source: "source", value: address }], address));
     }
     const patterns: [
       RegExp, string, Severity, string
@@ -457,3 +457,4 @@ export async function analyzeGithub(owner: string, repo: string): Promise<Analys
   a.metadata = { ...a.metadata, github: { owner, repo }, filesRead: files.length };
   return a;
 }
+
