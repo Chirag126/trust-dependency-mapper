@@ -1,7 +1,11 @@
+
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { analyzeFiles } from "./analyzer";
 
 async function main() {
+  // Keep the existing combined regression test.
   const source = `
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
@@ -14,17 +18,67 @@ contract Test {
  function upgradeTo(address x) external { require(msg.sender==owner); (bool ok,)=x.delegatecall(""); require(ok); }
 }
 `;
-  const a = await analyzeFiles([{ path: "Test.sol", content: source }], "self-test");
-  assert.ok(a.status === "completed" || a.status === "partial", "analysis should disclose complete or partial status");
+
+  const a = await analyzeFiles(
+    [{ path: "Test.sol", content: source }],
+    "self-test"
+  );
+
+  assert.ok(
+    a.status === "completed" || a.status === "partial",
+    "analysis should disclose complete or partial status"
+  );
   assert.ok(a.dependencies.some(d => d.type === "oracle"), "oracle dependency missing");
   assert.ok(a.dependencies.some(d => d.type === "owner"), "owner dependency missing");
   assert.ok(a.dependencies.some(d => d.type === "proxy"), "upgrade dependency missing");
   assert.ok(a.summary.upgradeable, "upgradeable summary missing");
   assert.ok(a.findings.some(f => f.title.includes("Delegatecall")), "delegatecall finding missing");
-  assert.ok(a.logs.some(l => l.level === "success" || l.level === "warn"), "completion/partial-status log missing");
-  assert.ok(typeof a.metadata.compilerAvailable === "boolean", "compiler availability should be explicit");
+  assert.ok(
+    a.logs.some(l => l.level === "success" || l.level === "warn"),
+    "completion/partial-status log missing"
+  );
+  assert.ok(
+    typeof a.metadata.compilerAvailable === "boolean",
+    "compiler availability should be explicit"
+  );
+
+  // Run analysis against each standalone Solidity fixture.
+  const fixtures = [
+    { file: "proxy.sol", label: "proxy" },
+    { file: "oracle.sol", label: "oracle" },
+    { file: "access-control.sol", label: "access-control" },
+    { file: "external-calls.sol", label: "external-calls" }
+  ];
+
+  for (const fixture of fixtures) {
+    const content = await readFile(
+      resolve(process.cwd(), "fixtures", fixture.file),
+      "utf8"
+    );
+
+    assert.ok(content.includes("pragma solidity"), `${fixture.file} is not Solidity`);
+
+    const result = await analyzeFiles(
+      [{ path: fixture.file, content }],
+      `fixture-${fixture.label}`
+    );
+
+    assert.ok(
+      result.status === "completed" || result.status === "partial",
+      `${fixture.file}: analysis should disclose complete or partial status`
+    );
+
+    assert.ok(
+      typeof result.metadata.compilerAvailable === "boolean",
+      `${fixture.file}: compiler availability should be explicit`
+    );
+
+    console.log(`Fixture analysis passed: ${fixture.file} (${result.status})`);
+  }
+
   console.log("TDM self-test: PASS");
 }
+
 main().catch(error => {
   console.error(error);
   process.exit(1);
