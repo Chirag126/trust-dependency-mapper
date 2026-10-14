@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+﻿import React, { useEffect, useRef, useState } from "react";
 import * as d3 from "d3";
 
 export default function Graph({ analysis, onSelect }: { analysis: any, onSelect: (id: string) => void; }) {
@@ -39,7 +39,25 @@ export default function Graph({ analysis, onSelect }: { analysis: any, onSelect:
     node.append("circle").attr("r", (d: any) => d.kind === "root" ? 27 : 20)
       .attr("fill", (d: any) => d.kind === "root" ? "#f8fafc" : d.severity === "critical" ? "#ef4444" : d.severity === "high" ? "#f59e0b" : d.severity === "medium" ? "#38bdf8" : "#64748b")
       .attr("stroke", "#0f172a").attr("stroke-width", 4);
-    node.append("text").text((d: any) => d.label).attr("x", 26).attr("y", 4).attr("fill", "#e2e8f0").attr("font-size", 12);
+    node.append("text")
+      .attr("class", "node-label")
+      .text((d: any) => d.label)
+      .attr("x", 26)
+      .attr("y", 4)
+      .attr("fill", "#e2e8f0")
+      .attr("font-size", 12)
+      .style("opacity", 0)
+      .style("pointer-events", "none");
+
+    node.on("mouseenter", function () {
+      d3.select(this).select(".node-label")
+        .interrupt()
+        .style("opacity", 1);
+    }).on("mouseleave", function () {
+      d3.select(this).select(".node-label")
+        .interrupt()
+        .style("opacity", 0);
+    });
     node.on("click", (_, d: any) => d.dependencyId && onSelect(d.dependencyId));
     sim.on("tick", () => {
       link.attr("x1", (d: any) => d.source.x).attr("y1", (d: any) => d.source.y).attr("x2", (d: any) => d.target.x).attr("y2", (d: any) => d.target.y);
@@ -50,7 +68,9 @@ export default function Graph({ analysis, onSelect }: { analysis: any, onSelect:
     };
   }, [analysis, onSelect]);
   return <div className="graph-wrap">
-    <div className="graph-tools"><button onClick={() => setZoom(z => Math.min(1.5, z + .1))}>Zoom +</button><button onClick={() => setZoom(z => Math.max(.7, z - .1))}>Zoom −</button><span>Drag nodes • click a dependency</span></div>
+    <div className="graph-tools"><button onClick={() => setZoom(z => Math.min(1.5, z + .1))}>Zoom +</button><button onClick={() => setZoom(z => Math.max(.7, z - .1))}>Zoom âˆ’</button><span>Drag nodes â€¢ click a dependency</span></div>
     <svg ref={ref} viewBox="0 0 900 520" style={{ transform: `scale(${zoom})` }} />
   </div>;
 }
+
+
