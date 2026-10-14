@@ -277,7 +277,15 @@ async function sourceAnalyze(files: SourceFile[], logs: any[]) {
         log(logs, "warn", "Compiler invocation failed; source dependency extraction remains available.");
       }
       const errors = (compiled.errors || []).filter((e: any) => e.severity === "error");
-      if (errors.length) log(logs, "warn", `${errors.length} compiler errors; source/import/inheritance analysis was retained.`);
+      if (errors.length) {
+        log(logs, "warn", `${errors.length} compiler errors; source/import/inheritance analysis was retained.`);
+        for (const e of errors.slice(0, 3)) {
+          const location = e.sourceLocation
+            ? `${e.sourceLocation.file || "unknown"}:${e.sourceLocation.start ?? "?"}`
+            : "unknown location";
+          log(logs, "warn", `Compiler detail [${location}]: ${String(e.formattedMessage || e.message || "Unknown compiler error").slice(0, 700)}`);
+        }
+      }
     }
   }
   for (const [file, cs] of Object.entries(compiled.contracts || {})) for (const [name, c] of Object.entries(cs as any)) {
@@ -457,4 +465,5 @@ export async function analyzeGithub(owner: string, repo: string): Promise<Analys
   a.metadata = { ...a.metadata, github: { owner, repo }, filesRead: files.length };
   return a;
 }
+
 
