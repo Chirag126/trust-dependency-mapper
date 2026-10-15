@@ -22,7 +22,7 @@ This is a production-oriented starter, not a claim of formal security correctnes
 - **Blast-radius simulator**: click a dependency and see reachable protocol components.
 - **Upgrade diff**: compare two analyses and identify added/removed/changed trust dependencies.
 - **Evidence explorer**: every discovered dependency can show its source/ABI/bytecode evidence.
-- **Policy watchlist**: save critical dependency fingerprints and re-run analysis to detect trust changes.
+- **Runtime watchlist**: re-check tracked contracts, compare dependency graph snapshots, retain immutable history, and expose check status, progress, retry attempts, and failures.
 - **Admin analytics**: anonymous usage counters, analysis success/failure, networks, input types, latency. No wallet/private-key data is collected.
 - **Audit log**: analysis lifecycle logs for each run.
 
@@ -98,7 +98,9 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - `POST /api/compare`
 - `POST /api/watchlist`
 - `GET /api/watchlist`
-- `POST /api/watchlist/:id/check`
+- `POST /api/watchlist/:id/check` — retry-backed runtime analysis, baseline comparison, and persisted snapshot
+- `GET /api/watchlist/:id/status` — latest run status and progress
+- `GET /api/watchlist/:id/snapshots?limit=20` — recent immutable snapshots with graph diffs
 - `GET /api/admin/analytics`
 - `GET /api/health`
 
@@ -107,7 +109,8 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - ZIP extraction rejects path traversal.
 - GitHub URLs are restricted to `github.com` public repositories.
 - Request body and upload size limits are enforced.
-- RPC calls use timeouts.
+- RPC calls use timeouts and bounded exponential backoff for transient failures.
+- Runtime monitoring stores historical snapshots and explicitly reports failed or unavailable checks; it does not claim unsupported trace capabilities are available on every RPC provider.
 - The service never asks for seed phrases or private keys.
 - Admin analytics are protected by `ADMIN_TOKEN`.
 - User identity is represented by an anonymous browser/session identifier.
