@@ -68,7 +68,7 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   await page.getByRole("button", { name: "Watch", exact: true }).click();
   await page.getByRole("button", { name: "History" }).click();
   await expect(page.getByText("Previous analyses")).toBeVisible();
-  await expect(page.getByText(/vault-fixture.zip/i)).toBeVisible();
+  await expect(page.getByRole("button", { name: /vault-fixture\.zip/i })).toBeVisible();
 
   await page.getByRole("button", { name: "Analyze" }).click();
   await page.getByRole("button", { name: "Upload Solidity ZIP" }).click();
