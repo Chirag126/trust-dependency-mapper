@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "./config";
-import { verifyAdmin, consumeRefreshToken, saveRefreshToken } from "./db";
+import { verifyAdmin, consumeRefreshToken, saveRefreshToken, verifyUser } from "./db";
 
 const secret = Buffer.from(config.adminJwtSecret);
 if (secret.length < 32) console.warn("WARNING: ADMIN_JWT_SECRET should be at least 32 bytes in production.");
@@ -35,4 +35,18 @@ export async function requireAdmin(token?: string) {
   } catch {
     return null;
   }
+}
+
+export async function userLogin(email:string,password:string) {
+ const user=verifyUser(email,password); if(!user)return null;
+ const access=await new SignJWT({sub:user.id,email:user.email,kind:"user"}).setProtectedHeader({alg:"HS256"}).setIssuedAt().setExpirationTime("12h").sign(secret);
+ return {access,user};
+}
+export async function requireUser(token?:string) {
+ if(!token)return null;
+ try {
+  const {payload}=await jwtVerify(token,secret,{algorithms:["HS256"]});
+  if(payload.kind!=="user"||typeof payload.sub!=="string"||typeof payload.email!=="string")return null;
+  return {id:payload.sub,email:payload.email};
+ } catch { return null; }
 }
