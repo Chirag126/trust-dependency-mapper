@@ -74,7 +74,7 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
     }
   }
 
-  if (response.status === 401 && token && sessionStorage.getItem("tdm_user_refresh") && !url.startsWith("/api/accounts/login") && !url.startsWith("/api/accounts/refresh") && !url.startsWith("/api/accounts/logout")) {
+  if (response.status === 401 && token && sessionStorage.getItem("tdm_user_refresh") && !url.startsWith("/api/accounts/login") && !url.startsWith("/api/accounts/refresh") && !url.startsWith("/api/accounts/logout") && !url.startsWith("/api/admin/")) {
     try {
       const refreshedResponse = await fetch(`${base}/api/accounts/refresh`, {
         method: "POST",
