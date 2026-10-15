@@ -5,6 +5,7 @@ import rateLimit from "express-rate-limit";
 import multer from "multer";
 import AdmZip from "adm-zip";
 import path from "node:path";
+import crypto from "node:crypto";
 import { z } from "zod";
 import { config } from "./config";
 import { analyzeAddress, analyzeFiles, analyzeGithub } from "./analyzer";
@@ -119,9 +120,7 @@ app.post("/api/billing/webhook",async(req:any,res)=>{
 
 async function optionalOrgContext(req:express.Request,res:express.Response) {
  if(!req.header("x-organization-id"))return null;
- const ctx=await orgContext(req,res,"member");if(!ctx)return false;
- try{reserveOrgAnalysis(ctx.org.id);}catch(e:any){res.status(429).json({error:e.message});return false;}
- return ctx;
+ return await orgContext(req,res,"member")||false;
 }
 async function readableAnalysis(req:express.Request,id:string) {
  const orgId=getAnalysisOrganization(id);
@@ -146,7 +145,7 @@ app.post("/api/auth/refresh", async (req, res) => {
 });
 
 app.post("/api/analyze/address", async (req, res) => {
-  const org = await optionalOrgContext(req,res); if(org===false)return;
+  const org = await optionalOrgContext(req,res); if(org===false)return;\n  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   const p = z.object({ address: z.string(), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });
   try {
