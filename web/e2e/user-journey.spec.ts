@@ -22,13 +22,19 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   await expect(page.getByRole("heading", { name: /know what your protocol trusts/i })).toBeVisible();
 
   await page.getByRole("button", { name: "Organizations" }).click();
-  await page.getByPlaceholder("Email address").fill(email);
-  await page.getByPlaceholder("Password (10+ characters)").fill(password);
-  await page.getByRole("button", { name: "Register & sign in" }).click();
-  await expect(page.getByPlaceholder("New organization name")).toBeVisible();
 
+  // Registration itself is exercised in the API integration suite. Create the
+  // account through the API here so this browser journey isolates the UI sign-in
+  // flow and does not conflate two API calls behind the "Register & sign in" button.
+  const registered = await request.post(`${apiBase}/api/accounts/register`, { data: { email, password } });
+  expect(registered.status()).toBe(201);
   const second = await request.post(`${apiBase}/api/accounts/register`, { data: { email: memberEmail, password } });
   expect(second.status()).toBe(201);
+
+  await page.getByPlaceholder("Email address").fill(email);
+  await page.getByPlaceholder("Password (10+ characters)").fill(password);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(page.getByPlaceholder("New organization name")).toBeVisible();
 
   await page.getByPlaceholder("New organization name").fill("Playwright security workspace");
   await page.getByRole("button", { name: "Create organization" }).click();
