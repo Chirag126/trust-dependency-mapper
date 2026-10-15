@@ -155,10 +155,6 @@ export function listAnalyses(session="anon",limit=50):Analysis[] {
  const rows=db.prepare("SELECT analysis_json FROM analyses WHERE organization_id IS NULL AND anonymous_session=? ORDER BY created_at DESC LIMIT ?").all(session,limit) as any[];
  return rows.map(r=>JSON.parse(r.analysis_json));
 }
-export function listAnalysesForUser(userId:string,limit=50):Analysis[] {
- const rows=db.prepare("SELECT a.analysis_json FROM analyses a JOIN organization_members m ON m.organization_id=a.organization_id AND m.user_id=? WHERE a.organization_id IS NOT NULL ORDER BY a.created_at DESC LIMIT ?").all(userId,limit) as any[];
- return rows.map(r=>JSON.parse(r.analysis_json));
-}
 export function listOrganizationAnalyses(orgId:string,userId:string,limit=50):Analysis[] {
  if(!getMembership(orgId,userId))return [];
  const rows=db.prepare("SELECT analysis_json FROM analyses WHERE organization_id=? ORDER BY created_at DESC LIMIT ?").all(orgId,limit) as any[];
