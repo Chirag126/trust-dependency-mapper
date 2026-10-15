@@ -114,6 +114,10 @@ test("API integration: accounts, workspace isolation, analysis, reports, watchli
   if (validGithub.status === 200) { const githubAnalysis = await json(validGithub); assert.ok(githubAnalysis.id && githubAnalysis.inputType === "github"); }
   const invalidGithub = await request("/api/analyze/github", { method: "POST", body: JSON.stringify({ url: "not a URL" }) });
   assert.equal(invalidGithub.status, 400);
+  const oversizedGithub = await request("/api/analyze/github", { method: "POST", body: JSON.stringify({ url: "https://github.com/" + "x".repeat(2100) }) });
+  assert.equal(oversizedGithub.status, 400);
+  const oversizedBody = await request("/api/analyze/address", { method: "POST", body: JSON.stringify({ address: "x".repeat(150_000), network: "ethereum" }) });
+  assert.ok([400, 413].includes(oversizedBody.status), "oversized JSON/address input must be rejected");
   const zip = zipFixture();
   const form = new FormData();
   form.append("project", new Blob([zip], { type: "application/zip" }), "vault.zip");
@@ -136,6 +140,10 @@ test("API integration: accounts, workspace isolation, analysis, reports, watchli
   const watch = await json(watchResponse);
   const watches = await json(await request("/api/watchlist"));
   assert.ok(watches.some((item: any) => Number(item.id) === Number(watch.id)));
+  assert.equal((await request(`/api/watchlist/${watch.id}/status`)).status, 200);
+  assert.equal((await request(`/api/watchlist/${watch.id}/snapshots?limit=5`)).status, 200);
+  const unsupportedZipWatchCheck = await request(`/api/watchlist/${watch.id}/check`, { method: "POST" });
+  assert.equal(unsupportedZipWatchCheck.status, 400, "the API must clearly reject live checks for non-address watch items");
   const hiddenWatch = await request(`/api/watchlist/${watch.id}/status`, {}, sessionB);
   assert.ok([403, 404].includes(hiddenWatch.status), "another browser session must not read watch status");
 
