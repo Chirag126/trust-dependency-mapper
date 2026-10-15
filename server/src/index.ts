@@ -152,6 +152,15 @@ async function readableAnalysis(req:express.Request,id:string) {
 }
 
 app.get("/api/health", (_, res) => res.json({ ok: true, service: "trust-dependency-mapper", networks }));
+app.get("/api/health/ready", (_req, res) => {
+  try {
+    db.prepare("SELECT 1 AS ok").get();
+    res.json({ ok: true, checks: { database: "ok" } });
+  } catch (error) {
+    console.error("Readiness check failed:", error instanceof Error ? error.message : error);
+    res.status(503).json({ ok: false, checks: { database: "failed" } });
+  }
+});
 app.post("/api/auth/login", authLimiter, async (req, res) => {
   const p = z.object({ username: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Credentials required" });
