@@ -36,9 +36,7 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   await expect(page.getByText(memberEmail)).toBeVisible();
 
   // Return to personal mode so these fixtures don't consume the organization's quota.
-  await page.getByRole("button", { name: "Personal / public mode" }).click().catch(async () => {
-    await page.locator("select").filter({ has: page.locator('option[value=""]') }).first().selectOption("");
-  });
+  await page.locator("select").filter({ has: page.locator("option[value=\"\"]") }).first().selectOption("");
   await page.getByRole("button", { name: "Analyze" }).click();
   await page.getByRole("button", { name: "Upload Solidity ZIP" }).click();
   await page.locator('input[type="file"][accept=".zip"]').setInputFiles({
@@ -65,7 +63,7 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   await page.getByRole("button", { name: /Analyze trust surface/ }).click();
   await expect(page.getByText("ANALYSIS COMPLETE")).toBeVisible({ timeout: 45_000 });
 
-  await page.getByRole("button", { name: "Security report" }).click();
+  await page.locator("aside").getByRole("button", { name: "Security report" }).click();
   await page.getByRole("button", { name: "Generate standard report" }).click();
   await expect(page.getByText("Executive summary")).toBeVisible();
   const jsonDownload = page.waitForEvent("download");
