@@ -242,6 +242,7 @@ app.post("/api/compare", async (req, res) => {
   if (!p.success) return res.status(400).json({ error: "beforeId and afterId required" });
   const a = await readableAnalysis(req,p.data.beforeId), b = await readableAnalysis(req,p.data.afterId);
   if (!a || !b) return res.status(404).json({ error: "One or both analyses not found" });
+  if (getAnalysisOrganization(a.id) !== getAnalysisOrganization(b.id)) return res.status(403).json({ error: "Compare analyses from the same workspace only" });
   res.json(compareAnalyses(a, b));
 });
 app.get("/api/analyses/:id/blast-radius/:dependencyId", async (req, res) => {
@@ -292,6 +293,7 @@ app.post("/api/watchlist/:id/check", async (req, res) => {
     updateWatchRun(w.id, { progress: 75, attempts: failedAttempts + 1, message: "Comparing current dependency graph with saved baseline", error: null });
     const baseline = JSON.parse(w.baseline_json);
     const diff = compareAnalyses(baseline, current);
+    if(scopedOrg)reserveOrgAnalysis(scopedOrg);
     saveAnalysis(current, session(req), scopedOrg);
     const block = Number(current.metadata?.block);
     saveWatchSnapshot({
@@ -306,10 +308,12 @@ app.post("/api/watchlist/:id/check", async (req, res) => {
     updateWatchRun(w.id, { status: "completed", progress: 100, message: "Snapshot saved; comparison complete", error: null, finished: true });
     res.json({ current, diff, status: getWatchRun(w.id), snapshots: listWatchSnapshots(w.id, 10) });
   } catch (e: any) {
-    const message = e?.message || "Watch check failed";
+    const rawMessage = e?.message || "Watch check failed";
+    const quota = /Monthly analysis quota reached/i.test(rawMessage);
+    const message = quota ? rawMessage : "Monitoring check failed. Verify the RPC provider and retry; details are available in server logs.";
     saveWatchSnapshot({ watchId: w.id, status: "failed", summary: {}, diff: {}, error: message });
     updateWatchRun(w.id, { status: "failed", progress: 100, message: "Monitoring check failed", error: message, finished: true });
-    res.status(503).json({ error: message, status: getWatchRun(w.id) });
+    res.status(quota ? 429 : 503).json({ error: message, status: getWatchRun(w.id) });
   }
 });
 app.get("/api/admin/analytics", async (req, res) => {
