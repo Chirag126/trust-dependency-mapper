@@ -126,8 +126,8 @@ async function optionalOrgContext(req:express.Request,res:express.Response) {
 async function readableAnalysis(req:express.Request,id:string) {
  const orgId=getAnalysisOrganization(id);
  const selectedOrg=req.header("x-organization-id");
- if(orgId&&selectedOrg&&orgId!==selectedOrg)return null;
- if(!orgId)return getAnalysis(id);
+ if(selectedOrg&&orgId!==selectedOrg)return null;
+ if(!orgId)return getAnalysis(id,session(req));
  const user=await requireUser(bearer(req));if(!user||!getMembership(orgId,user.id))return null;
  return getAnalysisForUser(id,user.id);
 }
@@ -202,7 +202,7 @@ app.get("/api/analyses", async (req, res) => {
  const limit=Math.min(Number(req.query.limit||50),200);
  const orgId=req.header("x-organization-id");
  if(orgId){if(!user||!getMembership(orgId,user.id))return res.status(404).json({error:"Organization not found"});return res.json(listOrganizationAnalyses(orgId,user.id,limit));}
- res.json(user?listAnalysesForUser(user.id,limit):listAnalyses(limit));
+ res.json(listAnalyses(session(req),limit));
 });
 app.get("/api/analyses/:id", async (req, res) => {
   const a = await readableAnalysis(req,req.params.id);
@@ -252,17 +252,17 @@ app.post("/api/watchlist", async (req, res) => {
   const p = z.object({ name: z.string().min(1).max(100), analysisId: z.string() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "name and analysisId required" });
   const a = await readableAnalysis(req,p.data.analysisId);
-  if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json({ id: saveWatch(p.data.name, a.inputType, a.inputLabel, a.network, a, org?.org.id) });
+  if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json({ id: saveWatch(p.data.name, a.inputType, a.inputLabel, a.network, a, org?.org.id, session(req)) });
 });
 app.get("/api/watchlist", async (req,res)=>{
  const orgId=req.header("x-organization-id");
  if(orgId){const ctx=await orgContext(req,res);if(!ctx)return res.status(403).json({error:"Organization access required"});return res.json(listWatch(ctx.org.id));}
- res.json(listWatch());
+ res.json(listWatch(undefined,session(req)));
 });
 app.get("/api/watchlist/:id/status", async (req, res) => {
   const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
-  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg)) return res.status(404).json({ error: "Watch not found" });
+  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg,session(req))) return res.status(404).json({ error: "Watch not found" });
   res.json(getWatchRun(id));
 });
 app.get("/api/watchlist/:id/snapshots", async (req, res) => {
@@ -274,7 +274,7 @@ app.get("/api/watchlist/:id/snapshots", async (req, res) => {
 app.post("/api/watchlist/:id/check", async (req, res) => {
   const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
-  const w = Number.isSafeInteger(id) && id > 0 ? getWatch(id,scopedOrg) : null;
+  const w = Number.isSafeInteger(id) && id > 0 ? getWatch(id,scopedOrg,session(req)) : null;
   if (!w) return res.status(404).json({ error: "Watch not found" });
   if (w.input_type !== "address") return res.status(400).json({ error: "Live watch checks currently support contract addresses" });
   startWatchRun(w.id);
