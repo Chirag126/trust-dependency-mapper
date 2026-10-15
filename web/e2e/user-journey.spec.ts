@@ -6,7 +6,7 @@ const serverDir = path.resolve(__dirname, "../../server");
 const password = "playwright-test-password-123";
 
 function solidityZip(): Buffer {
-  const script = `const AdmZip=require("adm-zip");const z=new AdmZip();z.addFile("contracts/Vault.sol",Buffer.from("pragma solidity ^0.8.20; contract Oracle { function latestAnswer() external pure returns(int256){return 42;} } contract Vault { address public owner; address public oracle; constructor(address o){owner=msg.sender;oracle=o;} function setOracle(address o) external {require(msg.sender==owner);oracle=o;} function withdraw(address target) external {(bool ok,)=target.call(\\"\\");require(ok);}}"));process.stdout.write(z.toBuffer().toString("base64"));`;
+  const script = `const AdmZip=require("adm-zip");const z=new AdmZip();z.addFile("contracts/Vault.sol",Buffer.from("pragma solidity ^0.8.20; contract Oracle { function latestAnswer() external pure returns(int256){return 42;} } contract Vault { address public owner; address public oracle; constructor(address o){owner=msg.sender;oracle=o;} function setOracle(address o) external {require(msg.sender==owner);oracle=o;} }"));process.stdout.write(z.toBuffer().toString("base64"));`;
   const encoded = execFileSync(process.execPath, ["-e", script], { cwd: serverDir, encoding: "utf8" });
   return Buffer.from(encoded, "base64");
 }
