@@ -121,15 +121,19 @@ export function consumeRefreshToken(raw: string) {
 }
 
 export function saveAnalysis(a: Analysis, session: string, organizationId?: string) {
-  db.prepare(`INSERT OR REPLACE INTO analyses
+  const result=db.prepare(`INSERT INTO analyses
     (id,created_at,input_type,input_label,network,status,duration_ms,analysis_json,anonymous_session,organization_id)
-    VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session,@organizationId)`)
+    VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session,@organizationId)
+    ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at,input_type=excluded.input_type,input_label=excluded.input_label,
+      network=excluded.network,status=excluded.status,duration_ms=excluded.duration_ms,analysis_json=excluded.analysis_json,
+      anonymous_session=excluded.anonymous_session,organization_id=excluded.organization_id
+    WHERE analyses.organization_id IS excluded.organization_id AND (analyses.organization_id IS NOT NULL OR analyses.anonymous_session=excluded.anonymous_session)`)
     .run({ id:a.id, createdAt:a.createdAt, inputType:a.inputType, inputLabel:a.inputLabel, network:a.network||null,
       status:a.status, durationMs:a.durationMs, json:JSON.stringify(a), session, organizationId:organizationId||null });
+  if(Number(result.changes)!==1)throw new Error("Analysis already exists or access is denied");
   db.prepare(`INSERT INTO events(created_at,event,input_type,network,duration_ms,status,anonymous_session,metadata_json)
     VALUES(?,?,?,?,?,?,?,?)`).run(new Date().toISOString(),"analysis_completed",a.inputType,a.network||null,a.durationMs,a.status,session,JSON.stringify({...a.metadata,organizationId:organizationId||null}));
 }
-
 export function logEvent(event: string, session: string, metadata: Record<string, unknown> = {}) {
   db.prepare(`INSERT INTO events(created_at,event,anonymous_session,metadata_json) VALUES(?,?,?,?)`)
     .run(new Date().toISOString(), event, session, JSON.stringify(metadata));
