@@ -18,9 +18,6 @@ export const db = new DatabaseSync(dbPath, {
 });
 
 db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
-try { db.exec("ALTER TABLE analyses ADD COLUMN organization_id TEXT"); } catch {}
-try { db.exec("ALTER TABLE watchlist ADD COLUMN organization_id TEXT"); } catch {}
-
 db.exec(`
 CREATE TABLE IF NOT EXISTS analyses (
   id TEXT PRIMARY KEY,
@@ -77,6 +74,9 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
   FOREIGN KEY(user_id) REFERENCES admin_users(id)
 );
 `);
+try { db.exec("ALTER TABLE analyses ADD COLUMN organization_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE watchlist ADD COLUMN organization_id TEXT"); } catch {}
+
 
 function scryptHash(password: string, salt = crypto.randomBytes(16).toString("hex")) {
   const hash = crypto.scryptSync(password, salt, 64).toString("hex");
