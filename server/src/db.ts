@@ -173,3 +173,47 @@ export function getWatch(id: number) {
 export function updateWatch(id: number, baseline: Analysis) {
   db.prepare("UPDATE watchlist SET baseline_json=?,last_check_at=? WHERE id=?").run(JSON.stringify(baseline), new Date().toISOString(), id);
 }
+
+
+export interface WatchSnapshot {
+  id: number; watch_id: number; captured_at: string; block_number: number | null;
+  status: string; analysis_id: string | null; summary_json: string; diff_json: string; error: string | null;
+}
+db.exec(`
+CREATE TABLE IF NOT EXISTS watch_snapshots (
+ id INTEGER PRIMARY KEY AUTOINCREMENT, watch_id INTEGER NOT NULL, captured_at TEXT NOT NULL,
+ block_number INTEGER, status TEXT NOT NULL, analysis_id TEXT, summary_json TEXT NOT NULL, diff_json TEXT NOT NULL,
+ error TEXT, FOREIGN KEY(watch_id) REFERENCES watchlist(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_watch_snapshots_watch_time ON watch_snapshots(watch_id,captured_at DESC);
+CREATE TABLE IF NOT EXISTS watch_runs (
+ watch_id INTEGER PRIMARY KEY, status TEXT NOT NULL, started_at TEXT NOT NULL, finished_at TEXT,
+ attempts INTEGER NOT NULL DEFAULT 0, progress INTEGER NOT NULL DEFAULT 0, message TEXT NOT NULL, error TEXT
+);
+`);
+export function startWatchRun(id:number) {
+ db.prepare(`INSERT INTO watch_runs(watch_id,status,started_at,finished_at,attempts,progress,message,error)
+ VALUES(?,'running',?,NULL,0,5,'Starting runtime check',NULL)
+ ON CONFLICT(watch_id) DO UPDATE SET status='running',started_at=excluded.started_at,finished_at=NULL,
+ attempts=0,progress=5,message='Starting runtime check',error=NULL`).run(id,new Date().toISOString());
+}
+export function updateWatchRun(id:number, update:{status?:string;attempts?:number;progress?:number;message?:string;error?:string|null;finished?:boolean}) {
+ const row=db.prepare("SELECT * FROM watch_runs WHERE watch_id=?").get(id) as any; if(!row)return;
+ db.prepare("UPDATE watch_runs SET status=?,attempts=?,progress=?,message=?,error=?,finished_at=? WHERE watch_id=?")
+ .run(update.status??row.status,update.attempts??row.attempts,update.progress??row.progress,update.message??row.message,
+ update.error===undefined?row.error:update.error,update.finished?new Date().toISOString():row.finished_at,id);
+}
+export function getWatchRun(id:number) {
+ return db.prepare("SELECT watch_id,status,started_at,finished_at,attempts,progress,message,error FROM watch_runs WHERE watch_id=?").get(id)
+ || {watch_id:id,status:"idle",started_at:null,finished_at:null,attempts:0,progress:0,message:"Not checked yet",error:null};
+}
+export function saveWatchSnapshot(input:{watchId:number;capturedAt?:string;blockNumber?:number|null;status:string;analysisId?:string|null;summary:unknown;diff:unknown;error?:string|null}) {
+ const result=db.prepare("INSERT INTO watch_snapshots(watch_id,captured_at,block_number,status,analysis_id,summary_json,diff_json,error) VALUES(?,?,?,?,?,?,?,?)")
+ .run(input.watchId,input.capturedAt||new Date().toISOString(),input.blockNumber??null,input.status,input.analysisId??null,
+ JSON.stringify(input.summary??{}),JSON.stringify(input.diff??{}),input.error??null);
+ return Number(result.lastInsertRowid);
+}
+export function listWatchSnapshots(id:number,limit=20) {
+ return (db.prepare("SELECT id,watch_id,captured_at,block_number,status,analysis_id,summary_json,diff_json,error FROM watch_snapshots WHERE watch_id=? ORDER BY captured_at DESC LIMIT ?")
+ .all(id,Math.max(1,Math.min(limit,100))) as any[]).map(row=>({...row,summary:JSON.parse(row.summary_json),diff:JSON.parse(row.diff_json),summary_json:undefined,diff_json:undefined}));
+}
