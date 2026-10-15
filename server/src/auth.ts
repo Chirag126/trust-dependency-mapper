@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { config } from "./config";
-import { verifyAdmin, consumeRefreshToken, saveRefreshToken, verifyUser, createUserSession, rotateUserSession, isUserSessionActive, revokeUserSession } from "./db";
+import { verifyAdmin, consumeRefreshToken, saveRefreshToken, verifyUser, createUserSession, rotateUserSession, isUserSessionActive, revokeUserSession, revokeUserSessionByRefresh } from "./db";
 
 const secret = Buffer.from(config.adminJwtSecret);
 if (secret.length < 32) console.warn("WARNING: ADMIN_JWT_SECRET should be at least 32 bytes in production.");
@@ -51,7 +51,8 @@ export async function userRefresh(raw:string) {
  const access=await new SignJWT({sub:rotated.user.id,email:rotated.user.email,kind:"user",sid:rotated.id}).setProtectedHeader({alg:"HS256"}).setIssuedAt().setExpirationTime("15m").sign(secret);
  return {access,refresh:next,user:rotated.user};
 }
-export async function userLogout(token?:string) {
+export async function userLogout(token?:string,rawRefresh?:string) {
+ if(rawRefresh&&revokeUserSessionByRefresh(rawRefresh))return true;
  const user=await requireUser(token);
  if(!user||!user.sessionId)return false;
  return revokeUserSession(user.sessionId,user.id);
