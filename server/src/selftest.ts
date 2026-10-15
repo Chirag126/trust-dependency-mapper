@@ -3,9 +3,25 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { analyzeFiles } from "./analyzer";
+import { createUser, createOrganization, getMembership, addMember, orgUsage, reserveOrgAnalysis, saveBillingEvent } from "./db";
 import { withRetry } from "./chain";
 
 async function main() {
+  // Organization isolation, role membership, quota enforcement, and webhook idempotency.
+  const suffix = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const owner = createUser(`owner-${suffix}@example.test`, "owner-password-123");
+  const member = createUser(`member-${suffix}@example.test`, "member-password-123");
+  const outsider = createUser(`outsider-${suffix}@example.test`, "outsider-password-123");
+  const org = createOrganization(owner.id, `TDM Test ${suffix}`);
+  assert.equal(getMembership(org.id, owner.id)?.role, "owner", "creator should become organization owner");
+  assert.equal(getMembership(org.id, outsider.id), undefined, "uninvited user must not access another organization");
+  addMember(org.id, member.email, "member");
+  assert.equal(getMembership(org.id, member.id)?.role, "member", "member role should persist");
+  assert.equal(orgUsage(org.id).limit, 10, "free plan should have a 10-analysis monthly quota");
+  for (let i = 0; i < 10; i++) reserveOrgAnalysis(org.id);
+  assert.throws(() => reserveOrgAnalysis(org.id), /quota reached/i, "free organization quota must be enforced server-side");
+  assert.equal(saveBillingEvent(`evt-${suffix}`, "test", "test.event", {}) , true, "first billing event should be recorded");
+  assert.equal(saveBillingEvent(`evt-${suffix}`, "test", "test.event", {}) , false, "duplicate billing events should be idempotent");
   let attempts = 0;
   const retried = await withRetry(async () => { attempts++; if (attempts < 2) throw new Error("transient RPC failure"); return "ok"; }, { attempts: 3, baseDelayMs: 50, maxDelayMs: 50 });
   assert.equal(retried, "ok", "retry helper should return successful result");
