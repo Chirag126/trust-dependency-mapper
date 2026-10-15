@@ -244,7 +244,7 @@ app.post("/api/compare", async (req, res) => {
   res.json(compareAnalyses(a, b));
 });
 app.get("/api/analyses/:id/blast-radius/:dependencyId", async (req, res) => {
-  const a = getAnalysis(req.params.id);
+  const a = await readableAnalysis(req,req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json(blastRadius(a, req.params.dependencyId));
 });
 app.post("/api/watchlist", async (req, res) => {
