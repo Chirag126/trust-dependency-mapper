@@ -385,6 +385,10 @@ export function saveBillingEvent(id:string,provider:string,type:string,payload:u
  .run(id,provider,type,new Date().toISOString(),JSON.stringify(payload));
  return Number(result.changes)>0;
 }
+export function isBillingEventProcessed(id:string) {
+ const row=db.prepare("SELECT processed FROM billing_events WHERE id=?").get(id) as any;
+ return row?.processed===1;
+}
 export function markBillingEventProcessed(id:string) {
  db.prepare("UPDATE billing_events SET processed=1 WHERE id=?").run(id);
 }
