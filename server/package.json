@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "test": "tsx src/selftest.ts"
+    "test": "tsx src/selftest.ts",
+    "test:integration": "tsx --test test/integration.test.ts"
   },
   "dependencies": {
     "adm-zip": "^0.5.16",
