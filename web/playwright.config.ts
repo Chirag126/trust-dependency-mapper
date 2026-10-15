@@ -42,7 +42,13 @@ export default defineConfig({
       cwd: here,
       url: "http://127.0.0.1:4173",
       reuseExistingServer: !process.env.CI,
-      timeout: 60_000
+      timeout: 60_000,
+      // The app's API client uses VITE_API_URL when provided. Point browser
+      // requests directly at this test run's isolated API, not Vite's HTML fallback
+      // or a production Render URL inherited from the developer's shell.
+      env: {
+        VITE_API_URL: "http://127.0.0.1:4400"
+      }
     }
   ]
 });
