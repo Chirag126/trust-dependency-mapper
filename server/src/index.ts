@@ -116,7 +116,8 @@ app.post("/api/billing/webhook",async(req:any,res)=>{
  }
  markBillingEventProcessed(p.data.id);res.json({received:true});
 });
-\nasync function optionalOrgContext(req:express.Request,res:express.Response) {
+
+async function optionalOrgContext(req:express.Request,res:express.Response) {
  if(!req.header("x-organization-id"))return null;
  const ctx=await orgContext(req,res,"member");if(!ctx)return false;
  try{reserveOrgAnalysis(ctx.org.id);}catch(e:any){res.status(429).json({error:e.message});return false;}
@@ -128,7 +129,8 @@ async function readableAnalysis(req:express.Request,id:string) {
  const user=await requireUser(bearer(req));if(!user||!getMembership(orgId,user.id))return null;
  return getAnalysisForUser(id,user.id);
 }
-\napp.get("/api/health", (_, res) => res.json({ ok: true, service: "trust-dependency-mapper", networks }));
+
+app.get("/api/health", (_, res) => res.json({ ok: true, service: "trust-dependency-mapper", networks }));
 app.post("/api/auth/login", async (req, res) => {
   const p = z.object({ username: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Credentials required" });
@@ -143,7 +145,8 @@ app.post("/api/auth/refresh", async (req, res) => {
   if (!out) return res.status(401).json({ error: "Invalid refresh token" }); res.json(out);
 });
 
-app.post("/api/analyze/address", async (req, res) => {\n  const org = await optionalOrgContext(req,res); if(org===false)return;
+app.post("/api/analyze/address", async (req, res) => {
+  const org = await optionalOrgContext(req,res); if(org===false)return;
   const p = z.object({ address: z.string(), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });
   try {
@@ -155,13 +158,14 @@ app.post("/api/analyze/address", async (req, res) => {\n  const org = await opti
     res.status(400).json({ error: e.message || "Analysis failed" });
   }
 });
-app.post("/api/analyze/github", async (req, res) => {\n  const org = await optionalOrgContext(req,res); if(org===false)return;
+app.post("/api/analyze/github", async (req, res) => {
+  const org = await optionalOrgContext(req,res); if(org===false)return;
   const p = z.object({ url: z.string().url() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Valid GitHub repository URL required" });
   try {
     const { owner, repo } = normalizeGithub(p.data.url);
     const a = await analyzeGithub(owner, repo);
-    saveAnalysis(a, session(req));
+    saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
   }
   catch (e: any) {
@@ -181,7 +185,8 @@ function extractZip(buffer: Buffer) {
     if (data.length <= 1_000_000) out.push({ path: n, content: data.toString("utf8") });
   } return out;
 }
-app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {\n  const org = await optionalOrgContext(req,res); if(org===false)return;
+app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
+  const org = await optionalOrgContext(req,res); if(org===false)return;
   if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });
   try {
     const files = extractZip(req.file.buffer);
@@ -193,7 +198,10 @@ app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {\n  
     res.status(400).json({ error: e.message || "ZIP analysis failed" });
   }
 });
-app.get("/api/analyses", async (req, res) => {\n const user=await requireUser(bearer(req));\n res.json(user?listAnalysesForUser(user.id,Math.min(Number(req.query.limit||50),200)):listAnalyses(Math.min(Number(req.query.limit||50),200)));\n});
+app.get("/api/analyses", async (req, res) => {
+ const user=await requireUser(bearer(req));
+ res.json(user?listAnalysesForUser(user.id,Math.min(Number(req.query.limit||50),200)):listAnalyses(Math.min(Number(req.query.limit||50),200)));
+});
 app.get("/api/analyses/:id", async (req, res) => {
   const a = await readableAnalysis(req,req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json(a);
@@ -219,13 +227,18 @@ app.get("/api/analyses/:id/blast-radius/:dependencyId", async (req, res) => {
   const a = getAnalysis(req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json(blastRadius(a, req.params.dependencyId));
 });
-app.post("/api/watchlist", async (req, res) => {\n const org=await optionalOrgContext(req,res);if(org===false)return;
+app.post("/api/watchlist", async (req, res) => {
+ const org=await optionalOrgContext(req,res);if(org===false)return;
   const p = z.object({ name: z.string().min(1).max(100), analysisId: z.string() }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "name and analysisId required" });
   const a = getAnalysis(p.data.analysisId);
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json({ id: saveWatch(p.data.name, a.inputType, a.inputLabel, a.network, a, org?.org.id) });
 });
-app.get("/api/watchlist", async (req,res)=>{\n const orgId=req.header("x-organization-id");\n if(orgId){const ctx=await orgContext(req,res);if(!ctx)return res.status(403).json({error:"Organization access required"});return res.json(listWatch(ctx.org.id));}\n res.json(listWatch());\n});
+app.get("/api/watchlist", async (req,res)=>{
+ const orgId=req.header("x-organization-id");
+ if(orgId){const ctx=await orgContext(req,res);if(!ctx)return res.status(403).json({error:"Organization access required"});return res.json(listWatch(ctx.org.id));}
+ res.json(listWatch());
+});
 app.get("/api/watchlist/:id/status", (req, res) => {
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id)) return res.status(404).json({ error: "Watch not found" });
