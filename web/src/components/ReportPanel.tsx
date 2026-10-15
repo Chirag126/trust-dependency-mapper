@@ -39,7 +39,7 @@ export default function ReportPanel({ analysis }: { analysis: Analysis | null })
 
   useEffect(() => { setReport(null); setError(""); }, [analysis?.id]);
 
-  function exportJson() {
+  async function exportSarif() {\n    if (!analysis) return;\n    try {\n      const sarif = await api<any>("/api/analyses/" + encodeURIComponent(analysis.id) + "/report.sarif");\n      const blob = new Blob([JSON.stringify(sarif, null, 2)], { type: "application/sarif+json" });\n      const url = URL.createObjectURL(blob);\n      const link = document.createElement("a");\n      link.href = url;\n      link.download = "tdm-" + analysis.id + ".sarif.json";\n      document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);\n    } catch (e: any) { setError(e?.message || "Could not export SARIF."); }\n  }\n\n  function exportJson() {
     if (!report) return;
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -56,7 +56,7 @@ export default function ReportPanel({ analysis }: { analysis: Analysis | null })
 
   return <section className="report-page">
     <div className="section-head"><div><div className="eyebrow">SECURITY REPORT</div><h2>{analysis.inputLabel}</h2><p>Evidence-backed report from the analysis engine. Status: {analysis.status}.</p></div>
-      <div className="actions"><button onClick={exportJson} disabled={!report}><Download size={15}/> Export JSON</button><button onClick={() => window.print()} disabled={!report}><Printer size={15}/> Print / Save PDF</button></div>
+      <div className="actions"><button onClick={exportJson} disabled={!report}><Download size={15}/> Export JSON</button><button onClick={exportSarif}><Download size={15}/> Export SARIF</button><button onClick={() => window.print()} disabled={!report}><Printer size={15}/> Print / Save PDF</button></div>
     </div>
     <div className="report-toolbar"><span>Report is generated from stored analysis data; no AI-generated claims are added in this version.</span><div className="report-buttons"><button className="primary" onClick={() => generate(false)} disabled={busy}>{busy ? <><RefreshCw className="spin" size={16}/>Generating…</> : <><FileText size={16}/>Generate standard report</>}</button><button className="primary secondary-report" onClick={() => generate(true)} disabled={busy}>{busy ? "Working…" : "Generate AI-enhanced report"}</button></div></div>
     {error && <div className="error page-error"><AlertTriangle size={16}/>{error}<button onClick={() => generate(false)}>Retry</button></div>}
