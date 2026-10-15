@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { analyzeFiles } from "./analyzer";
-import { createUser, createOrganization, getMembership, addMember, orgUsage, reserveOrgAnalysis, saveBillingEvent } from "./db";
+import { createUser, createOrganization, getMembership, addMember, orgUsage, reserveOrgAnalysis, saveBillingEvent, saveAnalysis, getAnalysisForUser, getAnalysis } from "./db";
 import { withRetry } from "./chain";
 
 async function main() {
@@ -17,6 +17,11 @@ async function main() {
   assert.equal(getMembership(org.id, outsider.id), undefined, "uninvited user must not access another organization");
   addMember(org.id, member.email, "member");
   assert.equal(getMembership(org.id, member.id)?.role, "member", "member role should persist");
+  const orgAnalysis:any={id:`org-analysis-${suffix}`,createdAt:new Date().toISOString(),inputType:"github",inputLabel:"private-test",network:undefined,durationMs:1,status:"completed",summary:{dependencyCount:0,critical:0,high:0,medium:0,low:0,privilegedControls:0,upgradeable:false},dependencies:[],nodes:[],edges:[],findings:[],logs:[],metadata:{}};
+  saveAnalysis(orgAnalysis,"selftest",org.id);
+  assert.equal(getAnalysisForUser(orgAnalysis.id,outsider.id),null,"outsider must not read another organization's analysis/report");
+  assert.equal(getAnalysisForUser(orgAnalysis.id,member.id)?.id,orgAnalysis.id,"organization member should read organization analysis");
+  assert.equal(getAnalysis(orgAnalysis.id),null,"public analysis lookup must not expose organization-owned analyses");
   assert.equal(orgUsage(org.id).limit, 10, "free plan should have a 10-analysis monthly quota");
   for (let i = 0; i < 10; i++) reserveOrgAnalysis(org.id);
   assert.throws(() => reserveOrgAnalysis(org.id), /quota reached/i, "free organization quota must be enforced server-side");
