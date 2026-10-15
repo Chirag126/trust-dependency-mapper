@@ -147,31 +147,25 @@ app.post("/api/auth/refresh", async (req, res) => {
 app.post("/api/analyze/address", async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
   const p = z.object({ address: z.string(), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
-
+  if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });
   if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const a = await analyzeAddress(p.data.address, p.data.network as any);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
-  }
-  catch (e: any) {
-    res.status(400).json({ error: e.message || "Analysis failed" });
-  }
+  } catch (e: any) { res.status(400).json({ error: e.message || "Analysis failed" }); }
 });
 app.post("/api/analyze/github", async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
   const p = z.object({ url: z.string().url() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: "Valid GitHub repository URL required" });  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
-
+  if (!p.success) return res.status(400).json({ error: "Valid GitHub repository URL required" });
   if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const { owner, repo } = normalizeGithub(p.data.url);
     const a = await analyzeGithub(owner, repo);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
-  }
-  catch (e: any) {
+  } catch (e: any) {
     console.error("GitHub analysis failed:", e);
     res.status(400).json({ error: e.message || "GitHub analysis failed" });
   }
@@ -182,15 +176,14 @@ function extractZip(buffer: Buffer) {
   if (entries.length > 1000) throw new Error("ZIP contains too many entries");
   const out: { path: string; content: string; }[] = [];
   for (const e of entries) {
-    if (e.isDirectory) continue; const n = path.posix.normalize(e.entryName.replace(/\\/g, "/"));
+    if (e.isDirectory) continue; const n = path.posix.normalize(e.entryName.replace(/\\\\/g, "/"));
     if (n.startsWith("../") || n.includes("/../") || n.startsWith("/")) throw new Error("Unsafe ZIP path");
-    if (!/\.(sol|json)$/i.test(n)) continue; const data = e.getData();
+    if (!/\\.(sol|json)$/i.test(n)) continue; const data = e.getData();
     if (data.length <= 1_000_000) out.push({ path: n, content: data.toString("utf8") });
   } return out;
 }
 app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
-  if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });
   if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
@@ -199,9 +192,7 @@ app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
     const a = await analyzeFiles(files, req.file.originalname);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
-  } catch (e: any) {
-    res.status(400).json({ error: e.message || "ZIP analysis failed" });
-  }
+  } catch (e: any) { res.status(400).json({ error: e.message || "ZIP analysis failed" }); }
 });
 app.get("/api/analyses", async (req, res) => {
  const user=await requireUser(bearer(req));
