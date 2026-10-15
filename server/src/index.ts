@@ -30,6 +30,10 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: con
 function session(req: express.Request) {
   return safeSession(req.header("x-anonymous-session") || "anon");
 }
+function boundedLimit(raw:unknown,fallback:number,maximum:number) {
+  const n=typeof raw==="string"?Number(raw):NaN;
+  return Number.isSafeInteger(n)?Math.max(1,Math.min(n,maximum)):fallback;
+}
 
 function analysisErrorStatus(error: unknown): number {
   const message = error instanceof Error ? error.message : String(error);
@@ -62,7 +66,7 @@ async function orgContext(req:express.Request,res:express.Response,minimum:"memb
 app.post("/api/accounts/register",authLimiter,(req,res)=>{
  const p=z.object({email:z.string().email().max(254),password:z.string().min(10).max(200)}).safeParse(req.body);
  if(!p.success)return res.status(400).json({error:"Provide a valid email and password of at least 10 characters"});
- try { res.status(201).json(createUser(p.data.email,p.data.password)); } catch(e:any) { res.status(409).json({error:e.message||"Account creation failed"}); }
+ try { res.status(201).json(createUser(p.data.email,p.data.password)); } catch(e:any) { const duplicate=/already exists/i.test(e?.message||""); res.status(duplicate?409:500).json({error:duplicate?e.message:"Account creation failed. Check server logs."}); }
 });
 app.post("/api/accounts/login",authLimiter,async(req,res)=>{
  const p=z.object({email:z.string().email(),password:z.string().min(1)}).safeParse(req.body);
@@ -101,16 +105,16 @@ app.post("/api/organizations/members",async(req,res)=>{
  const ctx=await orgContext(req,res,"admin");if(!ctx)return;
  const p=z.object({email:z.string().email(),role:z.enum(["admin","member"])}).safeParse(req.body);
  if(!p.success)return res.status(400).json({error:"Valid email and role (admin/member) required"});
- try{res.status(201).json(addMember(ctx.org.id,p.data.email,p.data.role));}catch(e:any){res.status(409).json({error:e.message||"Could not add member"});}
+ try{res.status(201).json(addMember(ctx.org.id,p.data.email,p.data.role));}catch(e:any){const message=String(e?.message||"");res.status(409).json({error:/Create an account for this email/i.test(message)?message:"Member could not be added; verify the account and membership."});}
 });
 app.patch("/api/organizations/members/:userId",async(req,res)=>{
  const ctx=await orgContext(req,res,"admin");if(!ctx)return;
  const p=z.object({role:z.enum(["admin","member"])}).safeParse(req.body);if(!p.success)return res.status(400).json({error:"Role must be admin or member"});
- try{if(!changeMemberRole(ctx.org.id,req.params.userId,p.data.role))return res.status(404).json({error:"Member not found"});res.json({ok:true});}catch(e:any){res.status(409).json({error:e.message});}
+ try{if(!changeMemberRole(ctx.org.id,req.params.userId,p.data.role))return res.status(404).json({error:"Member not found"});res.json({ok:true});}catch(e:any){res.status(409).json({error:/owner role cannot be changed/i.test(String(e?.message||""))?"The organization owner role cannot be changed.":"Could not update member role."});}
 });
 app.delete("/api/organizations/members/:userId",async(req,res)=>{
  const ctx=await orgContext(req,res,"admin");if(!ctx)return;
- try{if(!removeMember(ctx.org.id,req.params.userId))return res.status(404).json({error:"Member not found"});res.json({ok:true});}catch(e:any){res.status(409).json({error:e.message});}
+ try{if(!removeMember(ctx.org.id,req.params.userId))return res.status(404).json({error:"Member not found"});res.json({ok:true});}catch(e:any){res.status(409).json({error:/owner role cannot be removed/i.test(String(e?.message||""))?"Transfer ownership before removing the owner.":"Could not remove organization member."});}
 });
 app.get("/api/organizations/usage",async(req,res)=>{
  const ctx=await orgContext(req,res);if(!ctx)return;res.json(orgUsage(ctx.org.id));
@@ -221,7 +225,7 @@ app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
 });
 app.get("/api/analyses", async (req, res) => {
  const user=await requireUser(bearer(req));
- const limit=Math.min(Number(req.query.limit||50),200);
+ const limit=boundedLimit(req.query.limit,50,200);
  const orgId=req.header("x-organization-id");
  if(orgId){if(!user||!getMembership(orgId,user.id))return res.status(404).json({error:"Organization not found"});return res.json(listOrganizationAnalyses(orgId,user.id,limit));}
  res.json(listAnalyses(session(req),limit));
@@ -292,7 +296,7 @@ app.get("/api/watchlist/:id/snapshots", async (req, res) => {
   const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg,session(req))) return res.status(404).json({ error: "Watch not found" });
-  res.json(listWatchSnapshots(id, Number(req.query.limit || 20)));
+  res.json(listWatchSnapshots(id, boundedLimit(req.query.limit,20,100)));
 });
 app.post("/api/watchlist/:id/check", async (req, res) => {
   const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
