@@ -159,13 +159,15 @@ app.post("/api/watchlist/:id/check", async (req, res) => {
   startWatchRun(w.id);
   try {
     updateWatchRun(w.id, { progress: 10, message: "Checking configured RPC and reading contract state" });
+    let failedAttempts = 0;
     const current = await withRetry(
       () => analyzeAddress(w.input_label, w.network),
       { attempts: 3, baseDelayMs: 300, maxDelayMs: 1600, onRetry: (attempt, error) => {
-        updateWatchRun(w.id, { attempts: attempt, progress: 15, message: `RPC attempt ${attempt} failed; backing off before retry`, error: error instanceof Error ? error.message : String(error) });
+        failedAttempts = attempt;
+        updateWatchRun(w.id, { attempts: attempt, progress: 15, message: `Attempt ${attempt} failed; backing off before retry`, error: error instanceof Error ? error.message : String(error) });
       }}
     );
-    updateWatchRun(w.id, { progress: 75, attempts: 3, message: "Comparing current dependency graph with saved baseline", error: null });
+    updateWatchRun(w.id, { progress: 75, attempts: failedAttempts + 1, message: "Comparing current dependency graph with saved baseline", error: null });
     const baseline = JSON.parse(w.baseline_json);
     const diff = compareAnalyses(baseline, current);
     saveAnalysis(current, session(req));
