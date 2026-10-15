@@ -39,7 +39,20 @@ export default function ReportPanel({ analysis }: { analysis: Analysis | null })
 
   useEffect(() => { setReport(null); setError(""); }, [analysis?.id]);
 
-  async function exportSarif() {\n    if (!analysis) return;\n    try {\n      const sarif = await api<any>("/api/analyses/" + encodeURIComponent(analysis.id) + "/report.sarif");\n      const blob = new Blob([JSON.stringify(sarif, null, 2)], { type: "application/sarif+json" });\n      const url = URL.createObjectURL(blob);\n      const link = document.createElement("a");\n      link.href = url;\n      link.download = "tdm-" + analysis.id + ".sarif.json";\n      document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);\n    } catch (e: any) { setError(e?.message || "Could not export SARIF."); }\n  }\n\n  function exportJson() {
+  async function exportSarif() {
+    if (!analysis) return;
+    try {
+      const sarif = await api<any>("/api/analyses/" + encodeURIComponent(analysis.id) + "/report.sarif");
+      const blob = new Blob([JSON.stringify(sarif, null, 2)], { type: "application/sarif+json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "tdm-" + analysis.id + ".sarif.json";
+      document.body.appendChild(link); link.click(); link.remove(); URL.revokeObjectURL(url);
+    } catch (e: any) { setError(e?.message || "Could not export SARIF."); }
+  }
+
+  function exportJson() {
     if (!report) return;
     const blob = new Blob([JSON.stringify(report, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
