@@ -395,7 +395,7 @@ async function analyzeText(files: { path: string; content: string; }[], label: s
   const summary = { dependencyCount: final.length, critical: final.filter(x => x.severity === "critical").length, high: final.filter(x => x.severity === "high").length, medium: final.filter(x => x.severity === "medium").length, low: final.filter(x => x.severity === "low").length, privilegedControls: final.filter(x => ["admin", "owner", "multisig", "proxy"].includes(x.type)).length, upgradeable: final.some(x => x.type === "proxy") };
   const partial = !sourceResult.compilerAvailable || sourceResult.compilerErrors > 0 || files.every(f => !f.path.endsWith(".sol"));
   log(logs, partial ? "warn" : "success", `${partial ? "Partial analysis complete" : "Analysis complete"}: ${final.length} dependencies, ${findings.length} findings${partial ? ". Compiler-backed checks were unavailable or incomplete." : ""}`);
-  return { id: id(), inputType: "zip", inputLabel: label, createdAt: now(), durationMs, status: (!sourceResult.compilerAvailable || sourceResult.compilerErrors > 0 || files.every(f => !f.path.endsWith(".sol"))) ? "partial" : "completed", root: { name: label }, summary, dependencies: final, nodes: g.nodes, edges: g.edges, findings, logs, metadata: { contracts: contracts.length, solidityFiles: files.filter(f => f.path.endsWith(".sol")).length, compilerVersion: sourceResult.compilerVersion, compilerAvailable: sourceResult.compilerAvailable, compilerErrors: sourceResult.compilerErrors, analysisMode: (!sourceResult.compilerAvailable || sourceResult.compilerErrors > 0) ? "partial-source-analysis" : "compiler-backed", sourceAnalysis: "imports + inheritance + typed external interfaces + compiler-backed ABI analysis" } };
+  return { id: id(), inputType: "zip", inputLabel: label, createdAt: now(), durationMs, status: (!sourceResult.compilerAvailable || sourceResult.compilerErrors > 0 || files.every(f => !f.path.endsWith(".sol"))) ? "partial" : "completed", root: { name: label }, summary, dependencies: final, nodes: g.nodes, edges: g.edges, findings, logs, metadata: { contracts: contracts.length, solidityFiles: files.filter(f => f.path.endsWith(".sol")).length, compilerVersion: sourceResult.compilerVersion, compilerAvailable: sourceResult.compilerAvailable, compilerErrors: sourceResult.compilerErrors, analysisMode: (!sourceResult.compilerAvailable || sourceResult.compilerErrors > 0) ? "partial-source-analysis" : "compiler-backed", sourceAnalysis: "imports + inheritance + typed external interfaces + compiler-backed ABI analysis", evidencePolicy: { confirmed: "direct RPC/storage/ABI/compiler observations with attached evidence", heuristic: "source-pattern and opcode matches are candidates, not proof of exploitability", absence: "missing evidence is not evidence that a dependency or vulnerability is absent" } } };
 }
 
 export async function analyzeFiles(files: { path: string; content: string; }[], label: string) {
@@ -448,6 +448,8 @@ export async function analyzeAddress(address: string, network: Network): Promise
   // Trace real read-only calls where a known public getter exists. This exposes downstream contracts.
   const candidates = ["owner()", "admin()", "implementation()", "oracle()", "asset()", "token()", "router()", "bridge()"];
   const traceIface = new ethers.Interface(candidates.map(x => `function ${x} view returns(address)`));
+  // A successful ordinary eth_call is not evidence that RPC tracing works. Count
+  // only explicit trace attempts and mark support only when a trace payload arrives.
   let traceSupported = false;
   let traceAttempts = 0;
   for (const fn of candidates) {
@@ -457,7 +459,9 @@ export async function analyzeAddress(address: string, network: Network): Promise
       if (result === "0x") continue;
       const returned = traceIface.decodeFunctionResult(fn.split("(")[0], result)[0];
       if (!ethers.isAddress(returned) || returned === ethers.ZeroAddress) continue;
+      traceAttempts++;
       const trace = await traceCall(provider, { to: root, data });
+      if (trace && typeof trace === "object") traceSupported = true;
       const calls = trace ? collectTraceAddresses(trace) : [];
       if (calls.length) log(logs, "info", `${fn} read trace reached ${calls.length} address(es)`);
       const lower = fn.toLowerCase();
@@ -473,7 +477,8 @@ export async function analyzeAddress(address: string, network: Network): Promise
   }
 
   // Bytecode opcode presence is a weak signal and is explicitly labeled.
-  if (!traceSupported) log(logs, "warn", "RPC trace capability was unavailable or returned no trace for the supported read-only getter probes; missing trace output is not evidence that no external calls exist.");
+  if (!traceSupported) log(logs, "warn", `RPC trace capability was not confirmed (${traceAttempts} supported read-only getter trace attempt(s)); missing trace output is not evidence that no external calls exist.`);
+  else log(logs, "info", `RPC trace capability confirmed by ${traceAttempts} supported read-only getter trace attempt(s); this is not complete transaction tracing.`);
   const hex = code.slice(2).toLowerCase();
   if (hex.includes("f4")) deps.push(dep("DELEGATECALL surface", "external-contract", "medium", 0.55, ["external execution"], [{ reason: "DELEGATECALL opcode appears in bytecode; target must be established by tracing/source.", source: "bytecode" }]));
   if (hex.includes("fa")) deps.push(dep("STATICCALL surface", "external-contract", "low", 0.5, ["external reads"], [{ reason: "STATICCALL opcode appears in bytecode.", source: "bytecode" }]));
@@ -483,7 +488,7 @@ export async function analyzeAddress(address: string, network: Network): Promise
   const durationMs = Date.now() - started;
   const summary = { dependencyCount: final.length, critical: final.filter(x => x.severity === "critical").length, high: final.filter(x => x.severity === "high").length, medium: final.filter(x => x.severity === "medium").length, low: final.filter(x => x.severity === "low").length, privilegedControls: final.filter(x => ["admin", "owner", "multisig", "proxy"].includes(x.type)).length, upgradeable: final.some(x => x.type === "proxy") };
   log(logs, "success", `Analysis complete in ${durationMs} ms`);
-  return { id: id(), inputType: "address", inputLabel: root, network, root: { address: root, name: root }, createdAt: now(), durationMs, status: "completed", summary, dependencies: final, nodes: g.nodes, edges: g.edges, findings, logs, metadata: { block, bytecodeBytes: (code.length - 2) / 2, bytecodeHash: ethers.keccak256(code), proxySlots: slots, proxyProbe, accessControlRoles: roles, traceSupported, traceAttempts, traceMode: "read-only-getter-callTracer" } };
+  return { id: id(), inputType: "address", inputLabel: root, network, root: { address: root, name: root }, createdAt: now(), durationMs, status: "completed", summary, dependencies: final, nodes: g.nodes, edges: g.edges, findings, logs, metadata: { block, bytecodeBytes: (code.length - 2) / 2, bytecodeHash: ethers.keccak256(code), proxySlots: slots, proxyProbe, accessControlRoles: roles, traceSupported, traceAttempts, traceMode: "read-only-getter-callTracer", evidencePolicy: { confirmed: "direct RPC/storage observations with attached evidence", heuristic: "bytecode opcode presence is a weak signal, not proof of a reachable external call", absence: "missing evidence is not evidence that a dependency or vulnerability is absent" } } };
 }
 
 export async function analyzeGithub(owner: string, repo: string): Promise<Analysis> {
