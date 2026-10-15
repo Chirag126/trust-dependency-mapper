@@ -27,6 +27,9 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
     headers.set("Authorization", `Bearer ${token}`);
   }
 
+  const organizationId = sessionStorage.getItem("tdm_organization_id");
+  if (organizationId && !headers.has("x-organization-id")) headers.set("x-organization-id", organizationId);
+
   let response: Response;
   try {
     response = await fetch(target, { ...options, headers });
