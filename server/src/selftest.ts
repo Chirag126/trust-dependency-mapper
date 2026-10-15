@@ -7,6 +7,7 @@ import { createUser, createOrganization, getMembership, addMember, orgUsage, res
 import { withRetry } from "./chain";
 import { buildSarif } from "./sarif";
 import { mergeSlitherJson } from "./toolImport";
+import { userLogin, userRefresh, requireUser, userLogout } from "./auth";
 
 async function main() {
   // Organization isolation, role membership, quota enforcement, and webhook idempotency.
@@ -43,6 +44,15 @@ async function main() {
   assert.equal(isUserSessionActive(sessionId,owner.id),true,"rotating refresh token should keep the session active");
   assert.equal(revokeUserSession(sessionId,owner.id),true,"logout should revoke the session");
   assert.equal(isUserSessionActive(sessionId,owner.id),false,"revoked sessions must not authorize requests");
+  const loginResult=await userLogin(owner.email,"owner-password-123");
+  assert.ok(loginResult,"valid account credentials should create a session");
+  assert.ok(await requireUser(loginResult!.access),"fresh access token should authorize");
+  const rotatedLogin=await userRefresh(loginResult!.refresh);
+  assert.ok(rotatedLogin,"valid user refresh token should rotate");
+  assert.equal(await userRefresh(loginResult!.refresh),null,"a rotated user refresh token cannot be replayed");
+  assert.ok(await requireUser(rotatedLogin!.access),"rotated access token should authorize");
+  assert.equal(await userLogout(rotatedLogin!.access),true,"logout endpoint logic should revoke the session");
+  assert.equal(await requireUser(rotatedLogin!.access),null,"logout must invalidate already-issued access tokens");
   assert.equal(getAnalysisForUser(orgAnalysis.id,outsider.id),null,"outsider must not read another organization's analysis/report");
   assert.equal(getAnalysisForUser(orgAnalysis.id,member.id)?.id,orgAnalysis.id,"organization member should read organization analysis");
   assert.equal(getAnalysis(orgAnalysis.id),null,"public analysis lookup must not expose organization-owned analyses");
