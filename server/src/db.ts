@@ -217,3 +217,119 @@ export function listWatchSnapshots(id:number,limit=20) {
  return (db.prepare("SELECT id,watch_id,captured_at,block_number,status,analysis_id,summary_json,diff_json,error FROM watch_snapshots WHERE watch_id=? ORDER BY captured_at DESC LIMIT ?")
  .all(id,Math.max(1,Math.min(limit,100))) as any[]).map(row=>({...row,summary:JSON.parse(row.summary_json),diff:JSON.parse(row.diff_json),summary_json:undefined,diff_json:undefined}));
 }
+
+
+/* Day 5: organization tenancy, memberships, quotas, and subscription state. */
+db.exec(`
+CREATE TABLE IF NOT EXISTS users (
+ id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+ created_at TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0
+);
+CREATE TABLE IF NOT EXISTS organizations (
+ id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
+ plan TEXT NOT NULL DEFAULT 'free', subscription_status TEXT NOT NULL DEFAULT 'inactive',
+ billing_customer_id TEXT, billing_subscription_id TEXT,
+ created_at TEXT NOT NULL, created_by TEXT NOT NULL,
+ FOREIGN KEY(created_by) REFERENCES users(id)
+);
+CREATE TABLE IF NOT EXISTS organization_members (
+ organization_id TEXT NOT NULL, user_id TEXT NOT NULL, role TEXT NOT NULL CHECK(role IN ('owner','admin','member')),
+ created_at TEXT NOT NULL, PRIMARY KEY(organization_id,user_id),
+ FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS billing_events (
+ id TEXT PRIMARY KEY, provider TEXT NOT NULL, event_type TEXT NOT NULL, received_at TEXT NOT NULL,
+ processed INTEGER NOT NULL DEFAULT 0, payload_json TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS organization_usage (
+ organization_id TEXT NOT NULL, period TEXT NOT NULL, analyses INTEGER NOT NULL DEFAULT 0,
+ PRIMARY KEY(organization_id,period), FOREIGN KEY(organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+`);
+function userPasswordHash(password:string,salt=crypto.randomBytes(16).toString("hex")) {
+ return `${salt}:${crypto.scryptSync(password,salt,64).toString("hex")}`;
+}
+function userPasswordVerify(password:string,stored:string) {
+ const [salt,hash]=stored.split(":"); if(!salt||!hash)return false;
+ const a=Buffer.from(crypto.scryptSync(password,salt,64).toString("hex"),"hex"),b=Buffer.from(hash,"hex");
+ return a.length===b.length&&crypto.timingSafeEqual(a,b);
+}
+export function createUser(email:string,password:string) {
+ const normalized=email.trim().toLowerCase();
+ if(db.prepare("SELECT id FROM users WHERE email=?").get(normalized)) throw new Error("An account with this email already exists");
+ const id=crypto.randomUUID();
+ db.prepare("INSERT INTO users(id,email,password_hash,created_at) VALUES(?,?,?,?)").run(id,normalized,userPasswordHash(password),new Date().toISOString());
+ return {id,email:normalized};
+}
+export function verifyUser(email:string,password:string) {
+ const row=db.prepare("SELECT id,email,password_hash,disabled FROM users WHERE email=?").get(email.trim().toLowerCase()) as any;
+ if(!row||row.disabled||!userPasswordVerify(password,row.password_hash))return null;
+ return {id:row.id,email:row.email};
+}
+export function createOrganization(ownerId:string,name:string) {
+ const slugBase=name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,36)||"workspace";
+ let slug=slugBase,n=1; while(db.prepare("SELECT id FROM organizations WHERE slug=?").get(slug))slug=`${slugBase}-${++n}`;
+ const id=crypto.randomUUID(),now=new Date().toISOString();
+ db.prepare("INSERT INTO organizations(id,name,slug,plan,subscription_status,created_at,created_by) VALUES(?,?,?,'free','inactive',?,?)").run(id,name.trim(),slug,now,ownerId);
+ db.prepare("INSERT INTO organization_members(organization_id,user_id,role,created_at) VALUES(?,?,'owner',?)").run(id,ownerId,now);
+ logEvent("organization_created",ownerId,{organizationId:id,slug});
+ return getOrganization(id);
+}
+export function getOrganization(id:string) {
+ return db.prepare("SELECT id,name,slug,plan,subscription_status,created_at FROM organizations WHERE id=?").get(id) as any||null;
+}
+export function listOrganizationsForUser(userId:string) {
+ return db.prepare("SELECT o.id,o.name,o.slug,o.plan,o.subscription_status,m.role FROM organizations o JOIN organization_members m ON m.organization_id=o.id WHERE m.user_id=? ORDER BY o.created_at DESC").all(userId);
+}
+export function getMembership(orgId:string,userId:string) {
+ return db.prepare("SELECT role FROM organization_members WHERE organization_id=? AND user_id=?").get(orgId,userId) as {role:"owner"|"admin"|"member"}|undefined;
+}
+export function listMembers(orgId:string) {
+ return db.prepare("SELECT u.id,u.email,m.role,m.created_at FROM organization_members m JOIN users u ON u.id=m.user_id WHERE m.organization_id=? ORDER BY m.created_at").all(orgId);
+}
+export function addMember(orgId:string,email:string,role:"admin"|"member") {
+ const user=db.prepare("SELECT id FROM users WHERE email=? AND disabled=0").get(email.trim().toLowerCase()) as any;
+ if(!user)throw new Error("Create an account for this email before adding it to the organization");
+ db.prepare("INSERT INTO organization_members(organization_id,user_id,role,created_at) VALUES(?,?,?,?)").run(orgId,user.id,role,new Date().toISOString());
+ logEvent("organization_member_added",user.id,{organizationId:orgId,role});
+ return {userId:user.id,email:email.trim().toLowerCase(),role};
+}
+export function changeMemberRole(orgId:string,userId:string,role:"admin"|"member") {
+ const member=getMembership(orgId,userId); if(!member) return false;
+ if(member.role==="owner")throw new Error("The organization owner role cannot be changed");
+ db.prepare("UPDATE organization_members SET role=? WHERE organization_id=? AND user_id=?").run(role,orgId,userId);
+ return true;
+}
+export function removeMember(orgId:string,userId:string) {
+ const member=getMembership(orgId,userId); if(!member)return false;
+ if(member.role==="owner")throw new Error("Transfer ownership before removing the owner");
+ db.prepare("DELETE FROM organization_members WHERE organization_id=? AND user_id=?").run(orgId,userId);
+ return true;
+}
+export function orgUsage(orgId:string) {
+ const period=new Date().toISOString().slice(0,7);
+ const org=db.prepare("SELECT plan,subscription_status FROM organizations WHERE id=?").get(orgId) as any;
+ const row=db.prepare("SELECT analyses FROM organization_usage WHERE organization_id=? AND period=?").get(orgId,period) as any;
+ const limits:Record<string,number>={free:10,team:250};
+ return {period,plan:org?.plan||"free",subscriptionStatus:org?.subscription_status||"inactive",analyses:row?.analyses||0,limit:limits[org?.plan]??10};
+}
+export function reserveOrgAnalysis(orgId:string) {
+ const usage=orgUsage(orgId);
+ if(usage.analyses>=usage.limit)throw new Error(`Monthly analysis quota reached (${usage.analyses}/${usage.limit}). Upgrade your plan or try next month.`);
+ const period=usage.period;
+ db.prepare("INSERT INTO organization_usage(organization_id,period,analyses) VALUES(?,?,1) ON CONFLICT(organization_id,period) DO UPDATE SET analyses=analyses+1").run(orgId,period);
+ return usage;
+}
+export function setOrganizationSubscription(orgId:string,plan:"free"|"team",status:string,customerId?:string|null,subscriptionId?:string|null) {
+ db.prepare("UPDATE organizations SET plan=?,subscription_status=?,billing_customer_id=COALESCE(?,billing_customer_id),billing_subscription_id=COALESCE(?,billing_subscription_id) WHERE id=?")
+ .run(plan,status,customerId??null,subscriptionId??null,orgId);
+}
+export function saveBillingEvent(id:string,provider:string,type:string,payload:unknown) {
+ const result=db.prepare("INSERT OR IGNORE INTO billing_events(id,provider,event_type,received_at,processed,payload_json) VALUES(?,?,?,?,0,?)")
+ .run(id,provider,type,new Date().toISOString(),JSON.stringify(payload));
+ return Number(result.changes)>0;
+}
+export function markBillingEventProcessed(id:string) {
+ db.prepare("UPDATE billing_events SET processed=1 WHERE id=?").run(id);
+}
