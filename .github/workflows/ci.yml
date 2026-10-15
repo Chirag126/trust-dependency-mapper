@@ -31,9 +31,21 @@ jobs:
       - name: Run backend security and analysis tests
         working-directory: server
         run: npm test
+      - name: Run API integration journeys
+        working-directory: server
+        run: npm run test:integration
       - name: Install frontend dependencies
         working-directory: web
         run: npm ci
+      - name: Install Playwright test runner
+        working-directory: web
+        run: npm install --no-save @playwright/test
+      - name: Install Chromium for browser tests
+        working-directory: web
+        run: npx playwright install --with-deps chromium
+      - name: Run browser end-to-end journeys
+        working-directory: web
+        run: npm run test:e2e
       - name: Build frontend
         working-directory: web
         run: npm run build
