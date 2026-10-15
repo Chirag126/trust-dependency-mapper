@@ -244,6 +244,11 @@ CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
  created_at TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS user_sessions (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, refresh_token_hash TEXT UNIQUE NOT NULL,
+ expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT NOT NULL,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS organizations (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
  plan TEXT NOT NULL DEFAULT 'free', subscription_status TEXT NOT NULL DEFAULT 'inactive',
@@ -285,6 +290,31 @@ export function verifyUser(email:string,password:string) {
  const row=db.prepare("SELECT id,email,password_hash,disabled FROM users WHERE email=?").get(email.trim().toLowerCase()) as any;
  if(!row||row.disabled||!userPasswordVerify(password,row.password_hash))return null;
  return {id:row.id,email:row.email};
+}
+export function createUserSession(userId:string,rawRefresh:string,expiresAt:string) {
+ const id=crypto.randomUUID(),now=new Date().toISOString();
+ const hash=crypto.createHash("sha256").update(rawRefresh).digest("hex");
+ db.prepare("INSERT INTO user_sessions(id,user_id,refresh_token_hash,expires_at,created_at) VALUES(?,?,?,?,?)").run(id,userId,hash,expiresAt,now);
+ return id;
+}
+export function rotateUserSession(rawRefresh:string,nextRefresh:string,expiresAt:string) {
+ const hash=crypto.createHash("sha256").update(rawRefresh).digest("hex");
+ const nextHash=crypto.createHash("sha256").update(nextRefresh).digest("hex");
+ db.exec("BEGIN IMMEDIATE");
+ try {
+  const row=db.prepare("SELECT s.id,s.user_id,s.expires_at,u.email,u.disabled FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.refresh_token_hash=? AND s.revoked_at IS NULL").get(hash) as any;
+  if(!row||row.disabled||new Date(row.expires_at)<=new Date()){db.exec("ROLLBACK");return null;}
+  const result=db.prepare("UPDATE user_sessions SET refresh_token_hash=?,expires_at=? WHERE id=? AND refresh_token_hash=? AND revoked_at IS NULL").run(nextHash,expiresAt,row.id,hash);
+  if(Number(result.changes)!==1){db.exec("ROLLBACK");return null;}
+  db.exec("COMMIT");
+  return {id:row.id,user:{id:row.user_id,email:row.email}};
+ } catch(error) { db.exec("ROLLBACK"); throw error; }
+}
+export function isUserSessionActive(sessionId:string,userId:string) {
+ return !!db.prepare("SELECT id FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>?").get(sessionId,userId,new Date().toISOString());
+}
+export function revokeUserSession(sessionId:string,userId:string) {
+ return Number(db.prepare("UPDATE user_sessions SET revoked_at=? WHERE id=? AND user_id=? AND revoked_at IS NULL").run(new Date().toISOString(),sessionId,userId).changes)>0;
 }
 export function createOrganization(ownerId:string,name:string) {
  const slugBase=name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,36)||"workspace";
