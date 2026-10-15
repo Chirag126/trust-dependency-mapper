@@ -145,7 +145,8 @@ app.post("/api/auth/refresh", async (req, res) => {
 });
 
 app.post("/api/analyze/address", async (req, res) => {
-  const org = await optionalOrgContext(req,res); if(org===false)return;\n  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+  const org = await optionalOrgContext(req,res); if(org===false)return;
+  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   const p = z.object({ address: z.string(), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });
   try {
@@ -238,19 +239,22 @@ app.get("/api/watchlist", async (req,res)=>{
  if(orgId){const ctx=await orgContext(req,res);if(!ctx)return res.status(403).json({error:"Organization access required"});return res.json(listWatch(ctx.org.id));}
  res.json(listWatch());
 });
-app.get("/api/watchlist/:id/status", (req, res) => {
+app.get("/api/watchlist/:id/status", async (req, res) => {
+  const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
-  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id)) return res.status(404).json({ error: "Watch not found" });
+  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg)) return res.status(404).json({ error: "Watch not found" });
   res.json(getWatchRun(id));
 });
-app.get("/api/watchlist/:id/snapshots", (req, res) => {
+app.get("/api/watchlist/:id/snapshots", async (req, res) => {
+  const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
   if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id)) return res.status(404).json({ error: "Watch not found" });
   res.json(listWatchSnapshots(id, Number(req.query.limit || 20)));
 });
 app.post("/api/watchlist/:id/check", async (req, res) => {
+  const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
-  const w = Number.isSafeInteger(id) && id > 0 ? getWatch(id) : null;
+  const w = Number.isSafeInteger(id) && id > 0 ? getWatch(id,scopedOrg) : null;
   if (!w) return res.status(404).json({ error: "Watch not found" });
   if (w.input_type !== "address") return res.status(400).json({ error: "Live watch checks currently support contract addresses" });
   startWatchRun(w.id);
