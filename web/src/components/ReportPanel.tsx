@@ -13,6 +13,7 @@ type Report = {
   scenarios: string[];
   limitations: string[];
   reportMode: string;
+  fallbackReason?: string;
 };
 
 const severityClass = (severity: string) => severity === "critical" ? "sev-critical" : severity === "high" ? "sev-high" : severity === "medium" ? "sev-medium" : "sev-low";
@@ -22,12 +23,12 @@ export default function ReportPanel({ analysis }: { analysis: Analysis | null })
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
-  async function generate() {
+  async function generate(useAi = false) {
     if (!analysis) return;
     setBusy(true);
     setError("");
     try {
-      const result = await api<Report>("/api/analyses/" + encodeURIComponent(analysis.id) + "/report");
+      const result = await api<Report>("/api/analyses/" + encodeURIComponent(analysis.id) + (useAi ? "/report/ai" : "/report"));
       setReport(result);
     } catch (e: any) {
       setError(e?.message || "Could not generate the report.");
@@ -57,10 +58,10 @@ export default function ReportPanel({ analysis }: { analysis: Analysis | null })
     <div className="section-head"><div><div className="eyebrow">SECURITY REPORT</div><h2>{analysis.inputLabel}</h2><p>Evidence-backed report from the analysis engine. Status: {analysis.status}.</p></div>
       <div className="actions"><button onClick={exportJson} disabled={!report}><Download size={15}/> Export JSON</button><button onClick={() => window.print()} disabled={!report}><Printer size={15}/> Print / Save PDF</button></div>
     </div>
-    <div className="report-toolbar"><span>Report is generated from stored analysis data; no AI-generated claims are added in this version.</span><button className="primary" onClick={generate} disabled={busy}>{busy ? <><RefreshCw className="spin" size={16}/>Generating…</> : <><FileText size={16}/>Generate report</>}</button></div>
+    <div className="report-toolbar"><span>Report is generated from stored analysis data; no AI-generated claims are added in this version.</span><div className="report-buttons"><button className="primary" onClick={() => generate(false)} disabled={busy}>{busy ? <><RefreshCw className="spin" size={16}/>Generating…</> : <><FileText size={16}/>Generate standard report</>}</button><button className="primary secondary-report" onClick={() => generate(true)} disabled={busy}>{busy ? "Working…" : "Generate AI-enhanced report"}</button></div></div>
     {error && <div className="error page-error"><AlertTriangle size={16}/>{error}<button onClick={generate}>Retry</button></div>}
     {report && <>
-      <div className="report-meta"><span>Generated: {new Date(report.generatedAt).toLocaleString()}</span><span>Mode: {report.reportMode}</span><span>Input: {report.source.inputType}</span></div>
+      <div className="report-meta"><span>Generated: {new Date(report.generatedAt).toLocaleString()}</span><span>Mode: {report.reportMode}</span><span>Input: {report.source.inputType}</span></div>{report.fallbackReason && <div className="report-fallback">{report.fallbackReason}</div>}
       <div className="panel report-block"><div className="panel-title">Executive summary</div><p>{report.executiveSummary}</p><div className="report-stats">
         <ReportStat value={report.riskOverview.critical} label="Critical"/><ReportStat value={report.riskOverview.high} label="High"/><ReportStat value={report.riskOverview.medium} label="Medium"/><ReportStat value={report.riskOverview.low} label="Low"/><ReportStat value={report.riskOverview.dependencyCount} label="Dependencies"/>
       </div></div>
