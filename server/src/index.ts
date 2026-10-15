@@ -9,10 +9,10 @@ import { z } from "zod";
 import { config } from "./config";
 import { analyzeAddress, analyzeFiles, analyzeGithub } from "./analyzer";
 import { compareAnalyses, blastRadius } from "./compare";
-import { db, analytics, getAnalysis, listAnalyses, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent, startWatchRun, updateWatchRun, getWatchRun, saveWatchSnapshot, listWatchSnapshots } from "./db";
+import { db, analytics, getAnalysis, getAnalysisForUser, listAnalyses, listAnalysesForUser, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent, startWatchRun, updateWatchRun, getWatchRun, saveWatchSnapshot, listWatchSnapshots, createUser, createOrganization, listOrganizationsForUser, getOrganization, getMembership, listMembers, addMember, changeMemberRole, removeMember, orgUsage, reserveOrgAnalysis, setOrganizationSubscription, saveBillingEvent, markBillingEventProcessed } from "./db";
 import { normalizeGithub, safeSession } from "./utils";
 import { networks, withRetry } from "./chain";
-import { login, refresh, requireAdmin } from "./auth";
+import { login, refresh, requireAdmin, userLogin, requireUser } from "./auth";
 import { buildSecurityReport } from "./report";
 import { buildAiSecurityReport } from "./aiReport";
 
@@ -20,7 +20,7 @@ ensureAdminUser(config.adminUsername, config.adminPassword);
 
 const app = express();
 app.use(cors({ origin: config.corsOrigin }));
-app.use(express.json({ limit: "2mb" }));
+app.use(express.json({ limit: "2mb", verify: (req:any, _res, buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(rateLimit({ windowMs: 60_000, max: 80, standardHeaders: true, legacyHeaders: false }));
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxZipMb * 1024 * 1024 } });
 function session(req: express.Request) {
@@ -43,7 +43,80 @@ async function admin(req: express.Request) {
   return requireAdmin(req.header("authorization")?.replace(/^Bearer\s+/i, ""));
 }
 
-app.get("/api/health", (_, res) => res.json({ ok: true, service: "trust-dependency-mapper", networks }));
+
+function bearer(req:express.Request) { return req.header("authorization")?.replace(/^Bearer\\s+/i,""); }
+async function orgContext(req:express.Request,res:express.Response,minimum:"member"|"admin"|"owner"="member") {
+ const user=await requireUser(bearer(req)); if(!user){res.status(401).json({error:"Sign in with an account to access organization resources"});return null;}
+ const orgId=String(req.header("x-organization-id")||"");
+ if(!orgId){res.status(400).json({error:"x-organization-id header is required"});return null;}
+ const org=getOrganization(orgId),membership=getMembership(orgId,user.id);
+ if(!org||!membership){res.status(404).json({error:"Organization not found"});return null;}
+ const rank={member:1,admin:2,owner:3};
+ if(rank[membership.role]<rank[minimum]){res.status(403).json({error:"Your organization role does not permit this action"});return null;}
+ return {user,org,membership};
+}
+app.post("/api/accounts/register",(req,res)=>{
+ const p=z.object({email:z.string().email().max(254),password:z.string().min(10).max(200)}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Provide a valid email and password of at least 10 characters"});
+ try { res.status(201).json(createUser(p.data.email,p.data.password)); } catch(e:any) { res.status(409).json({error:e.message||"Account creation failed"}); }
+});
+app.post("/api/accounts/login",async(req,res)=>{
+ const p=z.object({email:z.string().email(),password:z.string().min(1)}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Email and password required"});
+ const out=await userLogin(p.data.email,p.data.password); if(!out)return res.status(401).json({error:"Invalid credentials"}); res.json(out);
+});
+app.get("/api/organizations",async(req,res)=>{
+ const user=await requireUser(bearer(req));if(!user)return res.status(401).json({error:"Sign in required"});
+ res.json(listOrganizationsForUser(user.id));
+});
+app.post("/api/organizations",async(req,res)=>{
+ const user=await requireUser(bearer(req));if(!user)return res.status(401).json({error:"Sign in required"});
+ const p=z.object({name:z.string().trim().min(2).max(80)}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Organization name must be 2-80 characters"});
+ res.status(201).json(createOrganization(user.id,p.data.name));
+});
+app.get("/api/organizations/members",async(req,res)=>{
+ const ctx=await orgContext(req,res);if(!ctx)return;
+ res.json(listMembers(ctx.org.id));
+});
+app.post("/api/organizations/members",async(req,res)=>{
+ const ctx=await orgContext(req,res,"admin");if(!ctx)return;
+ const p=z.object({email:z.string().email(),role:z.enum(["admin","member"])}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Valid email and role (admin/member) required"});
+ try{res.status(201).json(addMember(ctx.org.id,p.data.email,p.data.role));}catch(e:any){res.status(409).json({error:e.message||"Could not add member"});}
+});
+app.patch("/api/organizations/members/:userId",async(req,res)=>{
+ const ctx=await orgContext(req,res,"admin");if(!ctx)return;
+ const p=z.object({role:z.enum(["admin","member"])}).safeParse(req.body);if(!p.success)return res.status(400).json({error:"Role must be admin or member"});
+ try{if(!changeMemberRole(ctx.org.id,req.params.userId,p.data.role))return res.status(404).json({error:"Member not found"});res.json({ok:true});}catch(e:any){res.status(409).json({error:e.message});}
+});
+app.delete("/api/organizations/members/:userId",async(req,res)=>{
+ const ctx=await orgContext(req,res,"admin");if(!ctx)return;
+ try{if(!removeMember(ctx.org.id,req.params.userId))return res.status(404).json({error:"Member not found"});res.json({ok:true});}catch(e:any){res.status(409).json({error:e.message});}
+});
+app.get("/api/organizations/usage",async(req,res)=>{
+ const ctx=await orgContext(req,res);if(!ctx)return;res.json(orgUsage(ctx.org.id));
+});
+app.post("/api/billing/webhook",async(req:any,res)=>{
+ const secret=process.env.BILLING_WEBHOOK_SECRET||"";
+ if(!secret)return res.status(503).json({error:"Billing webhooks are disabled until BILLING_WEBHOOK_SECRET is configured"});
+ const signature=String(req.header("x-billing-signature")||"");
+ const expected=await import("node:crypto").then(({default:crypto})=>crypto.createHmac("sha256",secret).update(req.rawBody||Buffer.from("")).digest("hex"));
+ const crypto=await import("node:crypto");
+ const a=Buffer.from(signature),b=Buffer.from(expected);
+ if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(401).json({error:"Invalid billing webhook signature"});
+ const p=z.object({id:z.string().min(1),type:z.string().min(1),organizationId:z.string().uuid(),plan:z.enum(["free","team"]).optional(),status:z.string().optional(),customerId:z.string().optional(),subscriptionId:z.string().optional()}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Invalid billing event payload"});
+ if(!getOrganization(p.data.organizationId))return res.status(404).json({error:"Organization not found"});
+ if(!saveBillingEvent(p.data.id,"generic-hmac",p.data.type,req.body))return res.json({received:true,duplicate:true});
+ if(p.data.type==="subscription.updated"||p.data.type==="subscription.created"||p.data.type==="subscription.deleted"){
+  const status=p.data.type==="subscription.deleted"?"canceled":(p.data.status||"active");
+  const plan=status==="active"?(p.data.plan||"team"):"free";
+  setOrganizationSubscription(p.data.organizationId,plan,status,p.data.customerId,p.data.subscriptionId);
+ }
+ markBillingEventProcessed(p.data.id);res.json({received:true});
+});
+\napp.get("/api/health", (_, res) => res.json({ ok: true, service: "trust-dependency-mapper", networks }));
 app.post("/api/auth/login", async (req, res) => {
   const p = z.object({ username: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Credentials required" });
