@@ -22,7 +22,7 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
     headers.set("Content-Type", "application/json");
   }
 
-  const token = sessionStorage.getItem("tdm_admin_access");
+  const token = (sessionStorage.getItem("tdm_organization_id") ? sessionStorage.getItem("tdm_user_access") : null) || sessionStorage.getItem("tdm_admin_access") || sessionStorage.getItem("tdm_user_access");
   if (token && !headers.has("Authorization")) {
     headers.set("Authorization", `Bearer ${token}`);
   }
