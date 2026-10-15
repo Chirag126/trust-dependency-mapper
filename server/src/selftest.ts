@@ -102,11 +102,6 @@ contract Test {
     assert.equal(normalized.evidence[0]?.line, 7);
     assert.throws(() => mergeSlitherJson(result, { invalid: true }), /Unsupported Slither JSON/);
 
-    const result = await analyzeFiles(
-      [{ path: fixture.file, content }],
-      `fixture-${fixture.label}`
-    );
-
     assert.ok(
       result.status === "completed" || result.status === "partial",
       `${fixture.file}: analysis should disclose complete or partial status`
