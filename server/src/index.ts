@@ -9,9 +9,9 @@ import { z } from "zod";
 import { config } from "./config";
 import { analyzeAddress, analyzeFiles, analyzeGithub } from "./analyzer";
 import { compareAnalyses, blastRadius } from "./compare";
-import { db, analytics, getAnalysis, listAnalyses, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent } from "./db";
+import { db, analytics, getAnalysis, listAnalyses, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent, startWatchRun, updateWatchRun, getWatchRun, saveWatchSnapshot, listWatchSnapshots } from "./db";
 import { normalizeGithub, safeSession } from "./utils";
-import { networks } from "./chain";
+import { networks, withRetry } from "./chain";
 import { login, refresh, requireAdmin } from "./auth";
 import { buildSecurityReport } from "./report";
 import { buildAiSecurityReport } from "./aiReport";
@@ -141,19 +141,51 @@ app.post("/api/watchlist", (req, res) => {
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json({ id: saveWatch(p.data.name, a.inputType, a.inputLabel, a.network, a) });
 });
 app.get("/api/watchlist", (_, res) => res.json(listWatch()));
+app.get("/api/watchlist/:id/status", (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id)) return res.status(404).json({ error: "Watch not found" });
+  res.json(getWatchRun(id));
+});
+app.get("/api/watchlist/:id/snapshots", (req, res) => {
+  const id = Number(req.params.id);
+  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id)) return res.status(404).json({ error: "Watch not found" });
+  res.json(listWatchSnapshots(id, Number(req.query.limit || 20)));
+});
 app.post("/api/watchlist/:id/check", async (req, res) => {
-  const w = getWatch(Number(req.params.id));
+  const id = Number(req.params.id);
+  const w = Number.isSafeInteger(id) && id > 0 ? getWatch(id) : null;
   if (!w) return res.status(404).json({ error: "Watch not found" });
+  if (w.input_type !== "address") return res.status(400).json({ error: "Live watch checks currently support contract addresses" });
+  startWatchRun(w.id);
   try {
-    if (w.input_type !== "address") return res.status(400).json({ error: "Live watch checks currently support contract addresses" });
-    const current = await analyzeAddress(w.input_label, w.network);
+    updateWatchRun(w.id, { progress: 10, message: "Checking configured RPC and reading contract state" });
+    const current = await withRetry(
+      () => analyzeAddress(w.input_label, w.network),
+      { attempts: 3, baseDelayMs: 300, maxDelayMs: 1600, onRetry: (attempt, error) => {
+        updateWatchRun(w.id, { attempts: attempt, progress: 15, message: `RPC attempt ${attempt} failed; backing off before retry`, error: error instanceof Error ? error.message : String(error) });
+      }}
+    );
+    updateWatchRun(w.id, { progress: 75, attempts: 3, message: "Comparing current dependency graph with saved baseline", error: null });
     const baseline = JSON.parse(w.baseline_json);
     const diff = compareAnalyses(baseline, current);
-    updateWatch(w.id, current);
     saveAnalysis(current, session(req));
-    res.json({ current, diff });
+    const block = Number(current.metadata?.block);
+    saveWatchSnapshot({
+      watchId: w.id, blockNumber: Number.isFinite(block) ? block : null, status: current.status,
+      analysisId: current.id,
+      summary: { dependencyCount: current.summary.dependencyCount, critical: current.summary.critical, high: current.summary.high, upgradeable: current.summary.upgradeable },
+      diff: { summary: diff.summary, added: diff.added.map(d => ({ id: d.id, name: d.name, type: d.type, severity: d.severity, address: d.address })),
+        removed: diff.removed.map(d => ({ id: d.id, name: d.name, type: d.type, severity: d.severity, address: d.address })),
+        changed: diff.changed.map((d: any) => ({ before: { name: d.before.name, severity: d.before.severity, capabilities: d.before.capabilities }, after: { name: d.after.name, severity: d.after.severity, capabilities: d.after.capabilities } })) }
+    });
+    updateWatch(w.id, current);
+    updateWatchRun(w.id, { status: "completed", progress: 100, message: "Snapshot saved; comparison complete", error: null, finished: true });
+    res.json({ current, diff, status: getWatchRun(w.id), snapshots: listWatchSnapshots(w.id, 10) });
   } catch (e: any) {
-    res.status(400).json({ error: e.message || "Watch check failed" });
+    const message = e?.message || "Watch check failed";
+    saveWatchSnapshot({ watchId: w.id, status: "failed", summary: {}, diff: {}, error: message });
+    updateWatchRun(w.id, { status: "failed", progress: 100, message: "Monitoring check failed", error: message, finished: true });
+    res.status(503).json({ error: message, status: getWatchRun(w.id) });
   }
 });
 app.get("/api/admin/analytics", async (req, res) => {
