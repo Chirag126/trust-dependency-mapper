@@ -168,7 +168,7 @@ app.post("/api/analyze/address", async (req, res) => {
   if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });
   try {
     const a = await analyzeAddress(p.data.address, p.data.network as any);
-    if(org)reserveOrgAnalysis(org.org.id);
+    if(org&&a.status!=="failed")reserveOrgAnalysis(org.org.id);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
   } catch (e: any) { const message=e?.message||"Analysis failed"; const status=/Monthly analysis quota reached/i.test(message)?429:analysisErrorStatus(e); res.status(status).json({ error: status===429?message:status===503?"Analysis provider unavailable. Check provider configuration and retry.":"Analysis failed. Check the input and service logs, then retry." }); }
@@ -314,7 +314,7 @@ app.post("/api/watchlist/:id/check", async (req, res) => {
     updateWatchRun(w.id, { progress: 75, attempts: failedAttempts + 1, message: "Comparing current dependency graph with saved baseline", error: null });
     const baseline = JSON.parse(w.baseline_json);
     const diff = compareAnalyses(baseline, current);
-    if(scopedOrg)reserveOrgAnalysis(scopedOrg);
+    if(scopedOrg&&current.status!=="failed")reserveOrgAnalysis(scopedOrg);
     saveAnalysis(current, session(req), scopedOrg);
     const block = Number(current.metadata?.block);
     saveWatchSnapshot({
@@ -355,7 +355,7 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
   if (err?.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: `ZIP exceeds the ${config.maxZipMb} MB upload limit.` });
   if (err?.code === "LIMIT_UNEXPECTED_FILE") return res.status(400).json({ error: "Unexpected upload field. Use the project ZIP upload field." });
   console.error("Unhandled API error:", err?.message || err);
-  return res.status(status >= 400 && status < 500 ? status : 500).json({ error: status >= 500 ? "Unexpected server error. Check the API logs and retry." : (err?.message || "Invalid request") });
+  return res.status(status >= 400 && status < 500 ? status : 500).json({ error: status >= 500 ? "Unexpected server error. Check the API logs and retry." : "Invalid request. Check the payload and upload format." });
 });
 
 app.listen(config.port, () => console.log(`TDM API listening on http://localhost:${config.port}`));
