@@ -13,6 +13,7 @@ import { db, analytics, getAnalysis, listAnalyses, saveAnalysis, saveWatch, list
 import { normalizeGithub, safeSession } from "./utils";
 import { networks } from "./chain";
 import { login, refresh, requireAdmin } from "./auth";
+import { buildSecurityReport } from "./report";
 
 ensureAdminUser(config.adminUsername, config.adminPassword);
 
@@ -110,6 +111,11 @@ app.get("/api/analyses", (req, res) => res.json(listAnalyses(Math.min(Number(req
 app.get("/api/analyses/:id", (req, res) => {
   const a = getAnalysis(req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json(a);
+});
+app.get("/api/analyses/:id/report", (req, res) => {
+  const a = getAnalysis(req.params.id);
+  if (!a) return res.status(404).json({ error: "Analysis not found" });
+  res.json(buildSecurityReport(a));
 });
 app.post("/api/compare", (req, res) => {
   const p = z.object({ beforeId: z.string(), afterId: z.string() }).safeParse(req.body);
