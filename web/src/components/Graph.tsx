@@ -68,8 +68,8 @@ export default function Graph({ analysis, onSelect }: { analysis: any, onSelect:
     };
   }, [analysis, onSelect]);
   return <div className="graph-wrap">
-    <div className="graph-tools"><button onClick={() => setZoom(z => Math.min(1.5, z + .1))}>Zoom +</button><button onClick={() => setZoom(z => Math.max(.7, z - .1))}>Zoom âˆ’</button><span>Drag nodes â€¢ click a dependency</span></div>
-    <svg ref={ref} viewBox="0 0 900 520" style={{ transform: `scale(${zoom})` }} />
+    <div className="graph-tools"><button type="button" aria-label="Zoom graph in" onClick={() => setZoom(z => Math.min(1.8, Number((z + .15).toFixed(2))))}>Zoom +</button><button type="button" aria-label="Zoom graph out" onClick={() => setZoom(z => Math.max(.55, Number((z - .15).toFixed(2))))}>Zoom −</button><button type="button" aria-label="Fit graph to viewport" onClick={() => setZoom(1)}>Fit view</button><span>Drag nodes · zoom or fit view · select a dependency</span></div>
+    <svg ref={ref} role="img" aria-label="Interactive trust dependency graph. Select a node to inspect its evidence and blast radius." viewBox="0 0 900 520" style={{ transform: `scale(${zoom})` }} />
   </div>;
 }
 
