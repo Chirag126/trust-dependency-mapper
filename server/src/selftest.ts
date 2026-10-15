@@ -3,8 +3,13 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { analyzeFiles } from "./analyzer";
+import { withRetry } from "./chain";
 
 async function main() {
+  let attempts = 0;
+  const retried = await withRetry(async () => { attempts++; if (attempts < 2) throw new Error("transient RPC failure"); return "ok"; }, { attempts: 3, baseDelayMs: 50, maxDelayMs: 50 });
+  assert.equal(retried, "ok", "retry helper should return successful result");
+  assert.equal(attempts, 2, "retry helper should retry transient failures exactly once");
   // Keep the existing combined regression test.
   const source = `
 // SPDX-License-Identifier: MIT
