@@ -176,18 +176,18 @@ export function analytics() {
   return { totalAnalyses: total, completed, partial, failed: total - completed - partial, uniqueUsers, avgDurationMs: Math.round(avgMs), last24h, last7d, byInput, byNetwork, events };
 }
 
-export function saveWatch(name:string,inputType:string,inputLabel:string,network:string|undefined,baseline:Analysis,organizationId?:string) {
- const result=db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json,organization_id) VALUES(?,?,?,?,?,?,?)`)
- .run(new Date().toISOString(),name,inputType,inputLabel,network||null,JSON.stringify(baseline),organizationId||null);
+export function saveWatch(name:string,inputType:string,inputLabel:string,network:string|undefined,baseline:Analysis,organizationId?:string,ownerSession="anon") {
+ const result=db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json,organization_id,owner_session) VALUES(?,?,?,?,?,?,?,?)`)
+ .run(new Date().toISOString(),name,inputType,inputLabel,network||null,JSON.stringify(baseline),organizationId||null,ownerSession);
  return Number(result.lastInsertRowid);
 }
-export function listWatch(organizationId?:string) {
+export function listWatch(organizationId?:string,ownerSession="anon") {
  return organizationId ? db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id=? ORDER BY id DESC").all(organizationId)
- : db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id IS NULL ORDER BY id DESC").all();
+ : db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id IS NULL AND owner_session=? ORDER BY id DESC").all(ownerSession);
 }
-export function getWatch(id:number,organizationId?:string) {
+export function getWatch(id:number,organizationId?:string,ownerSession="anon") {
  return organizationId ? db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id=?").get(id,organizationId) as any
- : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL").get(id) as any;
+ : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL AND owner_session=?").get(id,ownerSession) as any;
 }
 export function updateWatch(id: number, baseline: Analysis) {
   db.prepare("UPDATE watchlist SET baseline_json=?,last_check_at=? WHERE id=?").run(JSON.stringify(baseline), new Date().toISOString(), id);
