@@ -121,15 +121,12 @@ export function consumeRefreshToken(raw: string) {
 
 export function saveAnalysis(a: Analysis, session: string, organizationId?: string) {
   db.prepare(`INSERT OR REPLACE INTO analyses
-    (id,created_at,input_type,input_label,network,status,duration_ms,analysis_json,anonymous_session)
-    VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session)`)
-    .run({
-      id: a.id, createdAt: a.createdAt, inputType: a.inputType, inputLabel: a.inputLabel, network: a.network || null,
-      status: a.status, durationMs: a.durationMs, json: JSON.stringify(a), session
-    });
+    (id,created_at,input_type,input_label,network,status,duration_ms,analysis_json,anonymous_session,organization_id)
+    VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session,@organizationId)`)
+    .run({ id:a.id, createdAt:a.createdAt, inputType:a.inputType, inputLabel:a.inputLabel, network:a.network||null,
+      status:a.status, durationMs:a.durationMs, json:JSON.stringify(a), session, organizationId:organizationId||null });
   db.prepare(`INSERT INTO events(created_at,event,input_type,network,duration_ms,status,anonymous_session,metadata_json)
-    VALUES(?,?,?,?,?,?,?,?)`).run(new Date().toISOString(), "analysis_completed", a.inputType, a.network || null,
-    a.durationMs, a.status, session, JSON.stringify(a.metadata || {}));
+    VALUES(?,?,?,?,?,?,?,?)`).run(new Date().toISOString(),"analysis_completed",a.inputType,a.network||null,a.durationMs,a.status,session,JSON.stringify({...a.metadata,organizationId:organizationId||null}));
 }
 
 export function logEvent(event: string, session: string, metadata: Record<string, unknown> = {}) {
@@ -161,16 +158,18 @@ export function analytics() {
   return { totalAnalyses: total, completed, partial, failed: total - completed - partial, uniqueUsers, avgDurationMs: Math.round(avgMs), last24h, last7d, byInput, byNetwork, events };
 }
 
-export function saveWatch(name: string, inputType: string, inputLabel: string, network: string | undefined, baseline: Analysis, organizationId?: string) {
-  const result = db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json)
-    VALUES(?,?,?,?,?,?)`).run(new Date().toISOString(), name, inputType, inputLabel, network || null, JSON.stringify(baseline));
-  return Number(result.lastInsertRowid);
+export function saveWatch(name:string,inputType:string,inputLabel:string,network:string|undefined,baseline:Analysis,organizationId?:string) {
+ const result=db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json,organization_id) VALUES(?,?,?,?,?,?,?)`)
+ .run(new Date().toISOString(),name,inputType,inputLabel,network||null,JSON.stringify(baseline),organizationId||null);
+ return Number(result.lastInsertRowid);
 }
-export function listWatch() {
-  return db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist ORDER BY id DESC").all();
+export function listWatch(organizationId?:string) {
+ return organizationId ? db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id=? ORDER BY id DESC").all(organizationId)
+ : db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id IS NULL ORDER BY id DESC").all();
 }
-export function getWatch(id: number) {
-  return db.prepare("SELECT * FROM watchlist WHERE id=?").get(id) as any;
+export function getWatch(id:number,organizationId?:string) {
+ return organizationId ? db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id=?").get(id,organizationId) as any
+ : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL").get(id) as any;
 }
 export function updateWatch(id: number, baseline: Analysis) {
   db.prepare("UPDATE watchlist SET baseline_json=?,last_check_at=? WHERE id=?").run(JSON.stringify(baseline), new Date().toISOString(), id);
