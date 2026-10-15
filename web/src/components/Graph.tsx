@@ -24,7 +24,7 @@ export default function Graph({ analysis, onSelect }: { analysis: any, onSelect:
       .force("center", d3.forceCenter(width / 2, height / 2))
       .force("collision", d3.forceCollide().radius((d: any) => d.kind === "root" ? 42 : 32));
     const link = g.selectAll(".link").data(edges).enter().append("line").attr("stroke", "rgba(148,163,184,.35)").attr("stroke-width", 1.5);
-    const node = g.selectAll(".node").data(nodes).enter().append("g").attr("cursor", "pointer")
+    const node = g.selectAll(".node").data(nodes).enter().append("g").attr("class", "node").attr("cursor", "pointer")
       .call(d3.drag<any, any>().on("start", (e, d) => {
         if (!e.active) sim.alphaTarget(.25).restart(); d.fx = d.x;
         d.fy = d.y;
