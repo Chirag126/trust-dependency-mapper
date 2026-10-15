@@ -47,7 +47,7 @@ async function admin(req: express.Request) {
 }
 
 
-function bearer(req:express.Request) { return req.header("authorization")?.replace(/^Bearer\\s+/i,""); }
+function bearer(req:express.Request) { return req.header("authorization")?.replace(/^Bearer\s+/i,""); }
 async function orgContext(req:express.Request,res:express.Response,minimum:"member"|"admin"|"owner"="member") {
  const user=await requireUser(bearer(req)); if(!user){res.status(401).json({error:"Sign in with an account to access organization resources"});return null;}
  const orgId=String(req.header("x-organization-id")||"");
@@ -149,28 +149,29 @@ app.post("/api/auth/refresh", async (req, res) => {
 
 app.post("/api/analyze/address", async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
-  const p = z.object({ address: z.string(), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
+  const p = z.object({ address: z.string().trim().min(1).max(100), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });
-  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const a = await analyzeAddress(p.data.address, p.data.network as any);
+    if(org)reserveOrgAnalysis(org.org.id);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
-  } catch (e: any) { res.status(400).json({ error: e.message || "Analysis failed" }); }
+  } catch (e: any) { const message=e?.message||"Analysis failed"; const status=/Monthly analysis quota reached/i.test(message)?429:analysisErrorStatus(e); res.status(status).json({ error: status===429?message:status===503?"Analysis provider unavailable. Check provider configuration and retry.":"Analysis failed. Check the input and service logs, then retry." }); }
 });
 app.post("/api/analyze/github", async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
-  const p = z.object({ url: z.string().url() }).safeParse(req.body);
+  const p = z.object({ url: z.string().url().max(2048) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Valid GitHub repository URL required" });
-  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const { owner, repo } = normalizeGithub(p.data.url);
     const a = await analyzeGithub(owner, repo);
+    if(org)reserveOrgAnalysis(org.org.id);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
   } catch (e: any) {
-    console.error("GitHub analysis failed:", e);
-    res.status(400).json({ error: e.message || "GitHub analysis failed" });
+    console.error("GitHub analysis failed:", e?.message || "unknown error");
+    const message=e?.message||"GitHub analysis failed"; const status=/Monthly analysis quota reached/i.test(message)?429:analysisErrorStatus(e);
+    res.status(status).json({ error: status===429?message:status===503?"Analysis provider unavailable. Check provider configuration and retry.":"GitHub analysis failed. Verify the repository URL and access, then retry." });
   }
 });
 function extractZip(buffer: Buffer) {
@@ -188,14 +189,14 @@ function extractZip(buffer: Buffer) {
 app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
   if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });
-  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const files = extractZip(req.file.buffer);
     if (!files.some(f => f.path.endsWith(".sol"))) return res.status(400).json({ error: "ZIP contains no Solidity files" });
     const a = await analyzeFiles(files, req.file.originalname);
+    if(org)reserveOrgAnalysis(org.org.id);
     saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
-  } catch (e: any) { res.status(400).json({ error: e.message || "ZIP analysis failed" }); }
+  } catch (e: any) { const message=e?.message||"ZIP analysis failed"; const status=/Monthly analysis quota reached/i.test(message)?429:analysisErrorStatus(e); res.status(status).json({ error: status===429?message:status===503?"Analysis provider unavailable. Check provider configuration and retry.":/Unsafe ZIP path|ZIP contains|Solidity files|too many entries/i.test(message)?message:"ZIP analysis failed. Check the archive and try again." }); }
 });
 app.get("/api/analyses", async (req, res) => {
  const user=await requireUser(bearer(req));
@@ -268,7 +269,7 @@ app.get("/api/watchlist/:id/status", async (req, res) => {
 app.get("/api/watchlist/:id/snapshots", async (req, res) => {
   const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
-  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg)) return res.status(404).json({ error: "Watch not found" });
+  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg,session(req))) return res.status(404).json({ error: "Watch not found" });
   res.json(listWatchSnapshots(id, Number(req.query.limit || 20)));
 });
 app.post("/api/watchlist/:id/check", async (req, res) => {
