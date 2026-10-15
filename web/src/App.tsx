@@ -15,7 +15,9 @@ export default function App(){
  const [busy,setBusy]=useState(false),[error,setError]=useState(""),[compare,setCompare]=useState<any>(null),[blast,setBlast]=useState<any>(null);
  const [admin,setAdmin]=useState<any>(null),[audit,setAudit]=useState<any[]>([]),[loginOpen,setLoginOpen]=useState(false),[watch,setWatch]=useState<any[]>([]);
  const [historyError,setHistoryError]=useState(""),[compareError,setCompareError]=useState("");
- const [watchRuns,setWatchRuns]=useState<Record<number,any>>({}),[watchBusy,setWatchBusy]=useState<number|null>(null);\n const [accountEmail,setAccountEmail]=useState(""),[accountPassword,setAccountPassword]=useState(""),[accountToken,setAccountToken]=useState(sessionStorage.getItem("tdm_user_access")||"");\n const [organizations,setOrganizations]=useState<any[]>([]),[organizationId,setOrganizationId]=useState(sessionStorage.getItem("tdm_organization_id")||""),[organizationName,setOrganizationName]=useState(""),[memberEmail,setMemberEmail]=useState(""),[memberRole,setMemberRole]=useState<"admin"|"member">("member"),[members,setMembers]=useState<any[]>([]),[orgUsage,setOrgUsage]=useState<any>(null),[orgError,setOrgError]=useState("");
+ const [watchRuns,setWatchRuns]=useState<Record<number,any>>({}),[watchBusy,setWatchBusy]=useState<number|null>(null);
+ const [accountEmail,setAccountEmail]=useState(""),[accountPassword,setAccountPassword]=useState(""),[accountToken,setAccountToken]=useState(sessionStorage.getItem("tdm_user_access")||"");
+ const [organizations,setOrganizations]=useState<any[]>([]),[organizationId,setOrganizationId]=useState(sessionStorage.getItem("tdm_organization_id")||""),[organizationName,setOrganizationName]=useState(""),[memberEmail,setMemberEmail]=useState(""),[memberRole,setMemberRole]=useState<"admin"|"member">("member"),[members,setMembers]=useState<any[]>([]),[orgUsage,setOrgUsage]=useState<any>(null),[orgError,setOrgError]=useState("");
 
  const loadHistory = async () => {
   try {
