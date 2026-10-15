@@ -100,7 +100,12 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - `GET /api/analyses/:id`
 - `POST /api/compare`
 - `POST /api/watchlist`
-- `POST /api/accounts/register` and `POST /api/accounts/login`\n- `POST /api/organizations` and `GET /api/organizations`\n- `GET /api/organizations/members`, `POST /api/organizations/members`, `PATCH /api/organizations/members/:userId`, `DELETE /api/organizations/members/:userId`\n- `GET /api/organizations/usage`\n- `POST /api/billing/webhook` (signed HMAC event adapter; disabled unless secret configured)\n- `GET /api/watchlist`
+- `POST /api/accounts/register` and `POST /api/accounts/login`
+- `POST /api/organizations` and `GET /api/organizations`
+- `GET /api/organizations/members`, `POST /api/organizations/members`, `PATCH /api/organizations/members/:userId`, `DELETE /api/organizations/members/:userId`
+- `GET /api/organizations/usage`
+- `POST /api/billing/webhook` (signed HMAC event adapter; disabled unless secret configured)
+- `GET /api/watchlist`
 - `POST /api/watchlist/:id/check` — retry-backed runtime analysis, baseline comparison, and persisted snapshot
 - `GET /api/watchlist/:id/status` — latest run status and progress
 - `GET /api/watchlist/:id/snapshots?limit=20` — recent immutable snapshots with graph diffs
@@ -115,8 +120,23 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - RPC calls use timeouts and bounded exponential backoff for transient failures.
 - Runtime monitoring stores historical snapshots and explicitly reports failed or unavailable checks; it does not claim unsupported trace capabilities are available on every RPC provider.
 - The service never asks for seed phrases or private keys.
-- Admin analytics are protected by authenticated admin JWTs.\n- Organization resources require a signed user token and organization membership; owner/admin/member roles are checked on the backend.\n- Organization analyses and watchlists are scoped by organization ID; quota counters are incremented and checked server-side.\n- Billing webhook processing is disabled until a secret is configured and rejects invalid signatures and duplicate event IDs.
+- Admin analytics are protected by authenticated admin JWTs.
+- Organization resources require a signed user token and organization membership; owner/admin/member roles are checked on the backend.
+- Organization analyses and watchlists are scoped by organization ID; quota counters are incremented and checked server-side.
+- Billing webhook processing is disabled until a secret is configured and rejects invalid signatures and duplicate event IDs.
 - User identity is represented by an anonymous browser/session identifier.
+### Security and data-integrity hardening
+
+- Personal analyses and personal watchlists are scoped to the browser session that created them; organization-owned records require active membership in the selected organization.
+- Analysis IDs cannot overwrite a record belonging to a different browser session or organization.
+- Comparisons reject analyses from different workspace scopes.
+- User access tokens expire after 15 minutes. Refresh tokens are stored as hashes, rotate on use, and cannot be replayed. Sign-out revokes the server-side session so already-issued access tokens stop authorizing requests.
+- Authentication endpoints have a separate rate limit. Production startup requires a strong `ADMIN_JWT_SECRET`, a non-default `ADMIN_PASSWORD`, and an explicit `CORS_ORIGIN`.
+- Organization quotas are reserved atomically and only after an analysis succeeds. Monitoring checks also count against organization quotas.
+- Billing webhook duplicates are acknowledged only after the event has been marked processed; unprocessed events remain retryable.
+- ZIP imports are bounded by upload size, entry count, per-file size, and total extracted content. Internal error details are kept in server logs rather than returned to clients.
+- Existing watchlist rows without an owner are migrated to a non-user-visible legacy owner rather than exposed to every session. Recreate legacy personal watches after upgrading.
+
 ## v0.2 analysis-engine upgrades
 
 ### Deeper EVM tracing
