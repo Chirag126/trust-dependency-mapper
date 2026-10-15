@@ -77,7 +77,9 @@ app.post("/api/accounts/refresh",authLimiter,async(req,res)=>{
  res.json(out);
 });
 app.post("/api/accounts/logout",async(req,res)=>{
- const ok=await userLogout(bearer(req));
+ const p=z.object({refresh:z.string().min(20).max(256).optional()}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Invalid logout request"});
+ const ok=await userLogout(bearer(req),p.data.refresh);
  if(!ok)return res.status(401).json({error:"Sign in again before logging out"});
  res.json({ok:true});
 });
