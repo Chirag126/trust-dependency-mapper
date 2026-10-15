@@ -203,3 +203,29 @@ The self-test compiles a Solidity fixture and checks owner/oracle/upgrade/delega
 - Provider identification should be treated as evidence-backed only when ABI/source/address metadata establishes it.
 - Public RPCs are not suitable for high-volume production without rate limits and monitoring.
 - Anonymous analytics intentionally avoid collecting wallet private keys, seed phrases, or unnecessary personal data.
+
+
+## End-to-end and API integration tests
+
+Backend integration tests start an isolated API process with a temporary SQLite database and exercise account registration/login, organization membership, access isolation, address/GitHub/ZIP analysis paths, report JSON and SARIF, watchlist ownership, comparisons, refresh-token replay, logout, malformed ZIPs, and authentication rate limits.
+
+```bash
+cd server
+npm ci
+npm run build
+npm test
+npm run test:integration
+```
+
+Browser journeys use Playwright and Chromium to cover registration, organization/member management, Solidity ZIP analysis, report exports, print-to-PDF invocation, watchlist creation, comparisons, invalid input feedback, and persisted history after reload.
+
+```bash
+cd web
+npm ci
+npm install --no-save @playwright/test
+npx playwright install chromium
+npm run test:e2e
+npm run build
+```
+
+The browser tests start the API on port 4400 and Vite on port 4173, using a dedicated local test database. The PDF workflow invokes the browser's Print / Save PDF feature; an actual PDF file is produced by the browser print dialog rather than a server-side PDF endpoint. GitHub analysis depends on public GitHub availability and rate limits, and address/watch checks depend on RPC configuration. Tests assert safe handling when these providers are unavailable; configure test RPC URLs and a GitHub token if deterministic live-provider success is required.
