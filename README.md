@@ -137,6 +137,35 @@ Runtime call addresses discovered by traces are added as graph dependencies and 
 ### Production admin auth
 Admin analytics now use short-lived HS256 JWT access tokens plus rotating, hashed refresh tokens stored server-side. Passwords are scrypt-hashed. Admin routes require an authenticated `admin` role. Set strong secrets in production and put the API behind HTTPS.
 
+## Day 6: audit integrations and developer exports
+
+### SARIF 2.1.0 export
+Every stored analysis can be exported as SARIF for GitHub code-scanning-style workflows. The export preserves TDM finding IDs, severity levels, messages, confidence, analysis metadata, and source evidence locations when available.
+
+- `GET /api/analyses/:id/report.sarif` — returns a downloadable SARIF 2.1.0 document.
+- The Security report UI includes **Export SARIF**.
+
+### Slither JSON import
+TDM can normalize Slither detector JSON into its existing finding/evidence model without replacing native TDM findings. Run Slither in your Solidity project environment, for example:
+
+```bash
+slither . --json slither.json
+```
+
+Then send the JSON object to `POST /api/analyses/:id/import/slither` with the same authorization and organization headers used to read the analysis. This merges detector findings and retains source file/line evidence when the Slither output provides it. Import is an explicit workflow; TDM does not install or execute Slither on uploaded projects.
+
+Example request:
+
+```bash
+curl -X POST "$TDM_API/api/analyses/ANALYSIS_ID/import/slither" \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $TDM_USER_TOKEN" \
+  --data-binary @slither.json
+```
+
+### Trace and source-matching boundaries
+Runtime trace data remains RPC-provider-dependent. TDM reports whether trace output was actually observed and records the number of supported getter probes attempted, rather than treating missing trace output as proof that no external calls exist. Address analyses also include the deployed bytecode keccak256 hash and observed block number as a reproducible code fingerprint; this is not by itself a source-verification proof. Source locations imported from third-party tools are evidence references, not proof that a finding is exploitable. Review imported findings against the exact source revision and deployed bytecode before acting on them.
+
 ## Test
 
 ```bash

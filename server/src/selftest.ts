@@ -5,6 +5,8 @@ import { resolve } from "node:path";
 import { analyzeFiles } from "./analyzer";
 import { createUser, createOrganization, getMembership, addMember, orgUsage, reserveOrgAnalysis, saveBillingEvent, saveAnalysis, getAnalysisForUser, getAnalysis } from "./db";
 import { withRetry } from "./chain";
+import { buildSarif } from "./sarif";
+import { mergeSlitherJson } from "./toolImport";
 
 async function main() {
   // Organization isolation, role membership, quota enforcement, and webhook idempotency.
@@ -84,10 +86,21 @@ contract Test {
 
     assert.ok(content.includes("pragma solidity"), `${fixture.file} is not Solidity`);
 
-    const result = await analyzeFiles(
-      [{ path: fixture.file, content }],
-      `fixture-${fixture.label}`
-    );
+    const result = await analyzeFiles([{ path: fixture.file, content }], `fixture-${fixture.label}`);
+    const sarif = buildSarif(result);
+    assert.equal(sarif.version, "2.1.0", `${fixture.file}: SARIF output should use version 2.1.0`);
+    assert.equal(sarif.runs[0].tool.driver.name, "Trust Dependency Mapper");
+    assert.equal(sarif.runs[0].results.length, result.findings.length, `${fixture.file}: SARIF should preserve each finding`);
+    const imported = mergeSlitherJson(result, { results: { detectors: [{
+      check: "reentrancy-eth", impact: "High", confidence: "High", description: "Imported test finding",
+      elements: [{ type: "function", name: "withdraw()", source_mapping: { filename_relative: fixture.file, lines: [7] } }]
+    }] } });
+    const normalized = imported.findings.find(f => f.id.startsWith("slither:reentrancy-eth"));
+    assert.ok(normalized, "Slither finding should normalize into TDM finding model");
+    assert.equal(normalized.severity, "high");
+    assert.equal(normalized.evidence[0]?.file, fixture.file);
+    assert.equal(normalized.evidence[0]?.line, 7);
+    assert.throws(() => mergeSlitherJson(result, { invalid: true }), /Unsupported Slither JSON/);
 
     assert.ok(
       result.status === "completed" || result.status === "partial",

@@ -448,6 +448,8 @@ export async function analyzeAddress(address: string, network: Network): Promise
   // Trace real read-only calls where a known public getter exists. This exposes downstream contracts.
   const candidates = ["owner()", "admin()", "implementation()", "oracle()", "asset()", "token()", "router()", "bridge()"];
   const traceIface = new ethers.Interface(candidates.map(x => `function ${x} view returns(address)`));
+  let traceSupported = false;
+  let traceAttempts = 0;
   for (const fn of candidates) {
     try {
       const data = traceIface.encodeFunctionData(fn.split("(")[0]);
@@ -471,6 +473,7 @@ export async function analyzeAddress(address: string, network: Network): Promise
   }
 
   // Bytecode opcode presence is a weak signal and is explicitly labeled.
+  if (!traceSupported) log(logs, "warn", "RPC trace capability was unavailable or returned no trace for the supported read-only getter probes; missing trace output is not evidence that no external calls exist.");
   const hex = code.slice(2).toLowerCase();
   if (hex.includes("f4")) deps.push(dep("DELEGATECALL surface", "external-contract", "medium", 0.55, ["external execution"], [{ reason: "DELEGATECALL opcode appears in bytecode; target must be established by tracing/source.", source: "bytecode" }]));
   if (hex.includes("fa")) deps.push(dep("STATICCALL surface", "external-contract", "low", 0.5, ["external reads"], [{ reason: "STATICCALL opcode appears in bytecode.", source: "bytecode" }]));
@@ -480,7 +483,7 @@ export async function analyzeAddress(address: string, network: Network): Promise
   const durationMs = Date.now() - started;
   const summary = { dependencyCount: final.length, critical: final.filter(x => x.severity === "critical").length, high: final.filter(x => x.severity === "high").length, medium: final.filter(x => x.severity === "medium").length, low: final.filter(x => x.severity === "low").length, privilegedControls: final.filter(x => ["admin", "owner", "multisig", "proxy"].includes(x.type)).length, upgradeable: final.some(x => x.type === "proxy") };
   log(logs, "success", `Analysis complete in ${durationMs} ms`);
-  return { id: id(), inputType: "address", inputLabel: root, network, root: { address: root, name: root }, createdAt: now(), durationMs, status: "completed", summary, dependencies: final, nodes: g.nodes, edges: g.edges, findings, logs, metadata: { block, bytecodeBytes: (code.length - 2) / 2, proxySlots: slots, proxyProbe, accessControlRoles: roles, traceSupported: true } };
+  return { id: id(), inputType: "address", inputLabel: root, network, root: { address: root, name: root }, createdAt: now(), durationMs, status: "completed", summary, dependencies: final, nodes: g.nodes, edges: g.edges, findings, logs, metadata: { block, bytecodeBytes: (code.length - 2) / 2, bytecodeHash: ethers.keccak256(code), proxySlots: slots, proxyProbe, accessControlRoles: roles, traceSupported, traceAttempts, traceMode: "read-only-getter-callTracer" } };
 }
 
 export async function analyzeGithub(owner: string, repo: string): Promise<Analysis> {

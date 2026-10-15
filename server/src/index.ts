@@ -15,6 +15,8 @@ import { normalizeGithub, safeSession } from "./utils";
 import { networks, withRetry } from "./chain";
 import { login, refresh, requireAdmin, userLogin, requireUser } from "./auth";
 import { buildSecurityReport } from "./report";
+import { buildSarif } from "./sarif";
+import { mergeSlitherJson } from "./toolImport";
 import { buildAiSecurityReport } from "./aiReport";
 
 ensureAdminUser(config.adminUsername, config.adminPassword);
@@ -207,12 +209,30 @@ app.get("/api/analyses/:id", async (req, res) => {
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json(a);
 });
 app.get("/api/analyses/:id/report", async (req, res) => {
-  const a = getAnalysis(req.params.id);
+  const a = await readableAnalysis(req,req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" });
   res.json(buildSecurityReport(a));
 });
+app.get("/api/analyses/:id/report.sarif", async (req, res) => {
+  const a = await readableAnalysis(req,req.params.id);
+  if (!a) return res.status(404).json({ error: "Analysis not found" });
+  res.setHeader("Content-Type", "application/sarif+json; version=2.1.0");
+  res.setHeader("Content-Disposition", `attachment; filename="tdm-${a.id}.sarif.json"`);
+  res.json(buildSarif(a));
+});
+app.post("/api/analyses/:id/import/slither", async (req, res) => {
+  const a = await readableAnalysis(req,req.params.id);
+  if (!a) return res.status(404).json({ error: "Analysis not found" });
+  try {
+    const merged = mergeSlitherJson(a, req.body);
+    saveAnalysis(merged, session(req), getAnalysisOrganization(a.id) || undefined);
+    res.json({ analysis: merged, importedTool: "slither", importedFindingCount: Number((merged.metadata as any).slitherImportedFindingCount || 0) });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message || "Could not import Slither JSON" });
+  }
+});
 app.get("/api/analyses/:id/report/ai", async (req, res) => {
-  const a = getAnalysis(req.params.id);
+  const a = await readableAnalysis(req,req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" });
   res.json(await buildAiSecurityReport(a));
 });
@@ -224,7 +244,7 @@ app.post("/api/compare", async (req, res) => {
   res.json(compareAnalyses(a, b));
 });
 app.get("/api/analyses/:id/blast-radius/:dependencyId", async (req, res) => {
-  const a = getAnalysis(req.params.id);
+  const a = await readableAnalysis(req,req.params.id);
   if (!a) return res.status(404).json({ error: "Analysis not found" }); res.json(blastRadius(a, req.params.dependencyId));
 });
 app.post("/api/watchlist", async (req, res) => {
