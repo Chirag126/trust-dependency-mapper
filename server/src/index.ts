@@ -10,7 +10,7 @@ import { z } from "zod";
 import { config } from "./config";
 import { analyzeAddress, analyzeFiles, analyzeGithub } from "./analyzer";
 import { compareAnalyses, blastRadius } from "./compare";
-import { db, analytics, getAnalysis, getAnalysisForUser, listAnalyses, listAnalysesForUser, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent, startWatchRun, updateWatchRun, getWatchRun, saveWatchSnapshot, listWatchSnapshots, createUser, createOrganization, listOrganizationsForUser, getOrganization, getMembership, listMembers, addMember, changeMemberRole, removeMember, orgUsage, reserveOrgAnalysis, setOrganizationSubscription, saveBillingEvent, markBillingEventProcessed, getAnalysisOrganization } from "./db";
+import { db, analytics, getAnalysis, getAnalysisForUser, listAnalyses, listAnalysesForUser, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent, startWatchRun, updateWatchRun, getWatchRun, saveWatchSnapshot, listWatchSnapshots, createUser, createOrganization, listOrganizationsForUser, getOrganization, getMembership, listMembers, addMember, changeMemberRole, removeMember, orgUsage, reserveOrgAnalysis, setOrganizationSubscription, saveBillingEvent, markBillingEventProcessed, getAnalysisOrganization, listOrganizationAnalyses } from "./db";
 import { normalizeGithub, safeSession } from "./utils";
 import { networks, withRetry } from "./chain";
 import { login, refresh, requireAdmin, userLogin, requireUser } from "./auth";
@@ -123,6 +123,8 @@ async function optionalOrgContext(req:express.Request,res:express.Response) {
 }
 async function readableAnalysis(req:express.Request,id:string) {
  const orgId=getAnalysisOrganization(id);
+ const selectedOrg=req.header("x-organization-id");
+ if(orgId&&selectedOrg&&orgId!==selectedOrg)return null;
  if(!orgId)return getAnalysis(id);
  const user=await requireUser(bearer(req));if(!user||!getMembership(orgId,user.id))return null;
  return getAnalysisForUser(id,user.id);
@@ -195,7 +197,10 @@ app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
 });
 app.get("/api/analyses", async (req, res) => {
  const user=await requireUser(bearer(req));
- res.json(user?listAnalysesForUser(user.id,Math.min(Number(req.query.limit||50),200)):listAnalyses(Math.min(Number(req.query.limit||50),200)));
+ const limit=Math.min(Number(req.query.limit||50),200);
+ const orgId=req.header("x-organization-id");
+ if(orgId){if(!user||!getMembership(orgId,user.id))return res.status(404).json({error:"Organization not found"});return res.json(listOrganizationAnalyses(orgId,user.id,limit));}
+ res.json(user?listAnalysesForUser(user.id,limit):listAnalyses(limit));
 });
 app.get("/api/analyses/:id", async (req, res) => {
   const a = await readableAnalysis(req,req.params.id);
