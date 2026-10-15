@@ -115,10 +115,10 @@ test("API integration: accounts, workspace isolation, analysis, reports, watchli
   const form = new FormData();
   form.append("project", new Blob([zip], { type: "application/zip" }), "vault.zip");
   const zipAnalysisResponse = await request("/api/analyze/zip", { method: "POST", body: form });
-  assert.equal(zipAnalysisResponse.status, 200, await zipAnalysisResponse.text().catch(() => ""));
+  assert.equal(zipAnalysisResponse.status, 200);
   const analysis = await json(zipAnalysisResponse);
-  assert.ok(analysis.id && analysis.graph && analysis.findings);
-  assert.ok(Array.isArray(analysis.dependencies) || Array.isArray(analysis.graph.nodes));
+  assert.ok(analysis.id && Array.isArray(analysis.nodes) && Array.isArray(analysis.edges) && Array.isArray(analysis.findings));
+  assert.ok(Array.isArray(analysis.dependencies));
 
   const reportResponse = await request(`/api/analyses/${analysis.id}/report`);
   assert.equal(reportResponse.status, 200);
