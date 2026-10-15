@@ -53,7 +53,7 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
     buffer: solidityZip()
   });
   await page.getByRole("button", { name: /Analyze trust surface/ }).click();
-  await expect(page.getByText("ANALYSIS COMPLETE")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText("ANALYSIS COMPLETE", { exact: true })).toBeVisible({ timeout: 45_000 });
   await expect(page.locator(".graph-panel")).toBeVisible();
   await expect(page.locator(".graph-panel svg g.node").first()).toBeVisible();
   await expect(page.locator(".lower-grid")).toBeVisible();
@@ -75,7 +75,7 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
     buffer: solidityZip()
   });
   await page.getByRole("button", { name: /Analyze trust surface/ }).click();
-  await expect(page.getByText("ANALYSIS COMPLETE")).toBeVisible({ timeout: 45_000 });
+  await expect(page.getByText("ANALYSIS COMPLETE", { exact: true })).toBeVisible({ timeout: 45_000 });
 
   await page.locator("aside").getByRole("button", { name: "Security report" }).click();
   await page.getByRole("button", { name: "Generate standard report" }).click();
