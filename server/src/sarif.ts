@@ -17,7 +17,7 @@ export function buildSarif(a: Analysis) {
   const results = (a.findings || []).map(f => {
     const locations = (f.evidence || []).filter(e => e.file || e.line).map(e => ({
       physicalLocation: {
-        ...(e.file ? { artifactLocation: { uri: e.file.replace(/\\\\/g, "/") } } : {}),
+        ...(e.file ? { artifactLocation: { uri: e.file.replace(/\\/g, "/") } } : {}),
         ...(e.line ? { region: { startLine: e.line } } : {})
       },
       ...(e.function ? { logicalLocations: [{ name: e.function, kind: "function" }] } : {})
