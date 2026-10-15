@@ -235,7 +235,6 @@ Browser journeys use Playwright and Chromium to cover registration, organization
 ```bash
 cd web
 npm ci
-npm install --no-save @playwright/test
 npx playwright install chromium
 npm run test:e2e
 npm run build
