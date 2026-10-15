@@ -59,7 +59,7 @@ export default function ReportPanel({ analysis }: { analysis: Analysis | null })
       <div className="actions"><button onClick={exportJson} disabled={!report}><Download size={15}/> Export JSON</button><button onClick={() => window.print()} disabled={!report}><Printer size={15}/> Print / Save PDF</button></div>
     </div>
     <div className="report-toolbar"><span>Report is generated from stored analysis data; no AI-generated claims are added in this version.</span><div className="report-buttons"><button className="primary" onClick={() => generate(false)} disabled={busy}>{busy ? <><RefreshCw className="spin" size={16}/>Generating…</> : <><FileText size={16}/>Generate standard report</>}</button><button className="primary secondary-report" onClick={() => generate(true)} disabled={busy}>{busy ? "Working…" : "Generate AI-enhanced report"}</button></div></div>
-    {error && <div className="error page-error"><AlertTriangle size={16}/>{error}<button onClick={generate}>Retry</button></div>}
+    {error && <div className="error page-error"><AlertTriangle size={16}/>{error}<button onClick={() => generate(false)}>Retry</button></div>}
     {report && <>
       <div className="report-meta"><span>Generated: {new Date(report.generatedAt).toLocaleString()}</span><span>Mode: {report.reportMode}</span><span>Input: {report.source.inputType}</span></div>{report.fallbackReason && <div className="report-fallback">{report.fallbackReason}</div>}
       <div className="panel report-block"><div className="panel-title">Executive summary</div><p>{report.executiveSummary}</p><div className="report-stats">
