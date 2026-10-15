@@ -192,7 +192,7 @@ app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
     const files = extractZip(req.file.buffer);
     if (!files.some(f => f.path.endsWith(".sol"))) return res.status(400).json({ error: "ZIP contains no Solidity files" });
     const a = await analyzeFiles(files, req.file.originalname);
-    saveAnalysis(a, session(req));
+    saveAnalysis(a, session(req), org?.org.id);
     res.json(a);
   } catch (e: any) {
     res.status(400).json({ error: e.message || "ZIP analysis failed" });
@@ -248,7 +248,7 @@ app.get("/api/watchlist/:id/status", async (req, res) => {
 app.get("/api/watchlist/:id/snapshots", async (req, res) => {
   const orgId=req.header("x-organization-id"); let scopedOrg:string|undefined; if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;scopedOrg=ctx.org.id;}
   const id = Number(req.params.id);
-  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id)) return res.status(404).json({ error: "Watch not found" });
+  if (!Number.isSafeInteger(id) || id < 1 || !getWatch(id,scopedOrg)) return res.status(404).json({ error: "Watch not found" });
   res.json(listWatchSnapshots(id, Number(req.query.limit || 20)));
 });
 app.post("/api/watchlist/:id/check", async (req, res) => {
@@ -271,7 +271,7 @@ app.post("/api/watchlist/:id/check", async (req, res) => {
     updateWatchRun(w.id, { progress: 75, attempts: failedAttempts + 1, message: "Comparing current dependency graph with saved baseline", error: null });
     const baseline = JSON.parse(w.baseline_json);
     const diff = compareAnalyses(baseline, current);
-    saveAnalysis(current, session(req));
+    saveAnalysis(current, session(req), scopedOrg);
     const block = Number(current.metadata?.block);
     saveWatchSnapshot({
       watchId: w.id, blockNumber: Number.isFinite(block) ? block : null, status: current.status,
