@@ -164,7 +164,7 @@ curl -X POST "$TDM_API/api/analyses/ANALYSIS_ID/import/slither" \
 ```
 
 ### Trace and source-matching boundaries
-Runtime trace data remains RPC-provider-dependent. TDM reports unavailable trace capability rather than treating missing trace output as proof that no external calls exist. Source locations imported from third-party tools are evidence references, not proof that a finding is exploitable. Review imported findings against the exact source revision and deployed bytecode before acting on them.
+Runtime trace data remains RPC-provider-dependent. TDM reports whether trace output was actually observed and records the number of supported getter probes attempted, rather than treating missing trace output as proof that no external calls exist. Address analyses also include the deployed bytecode keccak256 hash and observed block number as a reproducible code fingerprint; this is not by itself a source-verification proof. Source locations imported from third-party tools are evidence references, not proof that a finding is exploitable. Review imported findings against the exact source revision and deployed bytecode before acting on them.
 
 ## Test
 
