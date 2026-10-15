@@ -46,7 +46,7 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   });
   await page.getByRole("button", { name: /Analyze trust surface/ }).click();
   await expect(page.getByText("ANALYSIS COMPLETE")).toBeVisible({ timeout: 45_000 });
-  await expect(page.getByRole("button", { name: "Security report" })).toBeVisible();
+  await expect(page.locator("aside").getByRole("button", { name: "Security report" })).toBeVisible();
 
   await page.getByRole("button", { name: "Watch", exact: true }).click();
   await page.getByRole("button", { name: "History" }).click();
@@ -72,7 +72,9 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   const sarifDownload = page.waitForEvent("download");
   await page.getByRole("button", { name: "Export SARIF" }).click();
   expect((await sarifDownload).suggestedFilename()).toMatch(/\.sarif\.json$/);
+  await page.evaluate(() => { (window as any).__tdmPrintCalled = false; window.print = () => { (window as any).__tdmPrintCalled = true; }; });
   await page.getByRole("button", { name: "Print / Save PDF" }).click();
+  expect(await page.evaluate(() => (window as any).__tdmPrintCalled)).toBe(true);
 
   await page.getByRole("button", { name: "Compare" }).click();
   await expect(page.getByText(/Compare two analyses|Trust diff/i).first()).toBeVisible();
