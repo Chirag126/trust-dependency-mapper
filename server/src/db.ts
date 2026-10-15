@@ -317,6 +317,10 @@ export function rotateUserSession(rawRefresh:string,nextRefresh:string,expiresAt
 export function isUserSessionActive(sessionId:string,userId:string) {
  return !!db.prepare("SELECT id FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>?").get(sessionId,userId,new Date().toISOString());
 }
+export function revokeUserSessionByRefresh(rawRefresh:string) {
+ const hash=crypto.createHash("sha256").update(rawRefresh).digest("hex");
+ return Number(db.prepare("UPDATE user_sessions SET revoked_at=? WHERE refresh_token_hash=? AND revoked_at IS NULL").run(new Date().toISOString(),hash).changes)>0;
+}
 export function revokeUserSession(sessionId:string,userId:string) {
  return Number(db.prepare("UPDATE user_sessions SET revoked_at=? WHERE id=? AND user_id=? AND revoked_at IS NULL").run(new Date().toISOString(),sessionId,userId).changes)>0;
 }
