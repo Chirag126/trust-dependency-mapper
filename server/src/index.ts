@@ -102,8 +102,7 @@ app.post("/api/billing/webhook",async(req:any,res)=>{
  const secret=process.env.BILLING_WEBHOOK_SECRET||"";
  if(!secret)return res.status(503).json({error:"Billing webhooks are disabled until BILLING_WEBHOOK_SECRET is configured"});
  const signature=String(req.header("x-billing-signature")||"");
- const expected=await import("node:crypto").then(({default:crypto})=>crypto.createHmac("sha256",secret).update(req.rawBody||Buffer.from("")).digest("hex"));
- const crypto=await import("node:crypto");
+ const expected=crypto.createHmac("sha256",secret).update(req.rawBody||Buffer.from("")).digest("hex");
  const a=Buffer.from(signature),b=Buffer.from(expected);
  if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(401).json({error:"Invalid billing webhook signature"});
  const p=z.object({id:z.string().min(1),type:z.string().min(1),organizationId:z.string().uuid(),plan:z.enum(["free","team"]).optional(),status:z.string().optional(),customerId:z.string().optional(),subscriptionId:z.string().optional()}).safeParse(req.body);
@@ -176,9 +175,9 @@ function extractZip(buffer: Buffer) {
   if (entries.length > 1000) throw new Error("ZIP contains too many entries");
   const out: { path: string; content: string; }[] = [];
   for (const e of entries) {
-    if (e.isDirectory) continue; const n = path.posix.normalize(e.entryName.replace(/\\\\/g, "/"));
+    if (e.isDirectory) continue; const n = path.posix.normalize(e.entryName.replace(/\\/g, "/"));
     if (n.startsWith("../") || n.includes("/../") || n.startsWith("/")) throw new Error("Unsafe ZIP path");
-    if (!/\\.(sol|json)$/i.test(n)) continue; const data = e.getData();
+    if (!/\.(sol|json)$/i.test(n)) continue; const data = e.getData();
     if (data.length <= 1_000_000) out.push({ path: n, content: data.toString("utf8") });
   } return out;
 }
