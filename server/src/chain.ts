@@ -23,11 +23,17 @@ export async function withTimeout<T>(p: Promise<T>, ms = 15000): Promise<T> {
     })]);
   } finally { if (timer) clearTimeout(timer); }
 }
+export async function withRetry<T>(operation:()=>Promise<T>,options:{attempts?:number;baseDelayMs?:number;maxDelayMs?:number;onRetry?:(attempt:number,error:unknown)=>void}={}):Promise<T>{
+ const attempts=Math.max(1,Math.min(options.attempts??3,5)),base=Math.max(50,options.baseDelayMs??250),max=Math.max(base,options.maxDelayMs??2000);
+ let last:unknown;
+ for(let attempt=1;attempt<=attempts;attempt++){try{return await operation()}catch(error){last=error;if(attempt>=attempts)break;options.onRetry?.(attempt,error);await new Promise(resolve=>setTimeout(resolve,Math.min(max,base*2**(attempt-1))+Math.floor(Math.random()*100)));}}
+ throw last instanceof Error?last:new Error(String(last||"RPC request failed"));
+}
 export async function getContractContext(address: string, network: Network) {
   if (!ethers.isAddress(address)) throw new Error("Invalid EVM contract address. Enter a 0x-prefixed 20-byte address.");
   if (ethers.getAddress(address) === ethers.ZeroAddress) throw new Error("The zero address is not a deployed contract address.");
   const provider = providerFor(network);
-  const [code, block] = await Promise.all([withTimeout(provider.getCode(address)), withTimeout(provider.getBlockNumber())]);
+  const [code, block] = await Promise.all([withRetry(() => withTimeout(provider.getCode(address))), withRetry(() => withTimeout(provider.getBlockNumber()))]);
   if (code === "0x") throw new Error("No contract bytecode found at this address");
   return { provider, code, block };
 }
