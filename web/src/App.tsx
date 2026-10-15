@@ -1,5 +1,5 @@
 ﻿import React,{useEffect,useMemo,useState} from "react";
-import { Search, GitBranch, Upload, ShieldCheck, Activity, History, GitCompareArrows, Eye, AlertTriangle, CheckCircle2, Network, RefreshCw, Radar, FileDiff, LogIn, FileText } from "lucide-react";
+import { Search, GitBranch, Upload, ShieldCheck, Activity, History, GitCompareArrows, Eye, AlertTriangle, CheckCircle2, Network, RefreshCw, Radar, FileDiff, LogIn, FileText, Users, Building2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "./api";
 import Graph from "./components/Graph";
@@ -16,6 +16,8 @@ export default function App(){
  const [admin,setAdmin]=useState<any>(null),[audit,setAudit]=useState<any[]>([]),[loginOpen,setLoginOpen]=useState(false),[watch,setWatch]=useState<any[]>([]);
  const [historyError,setHistoryError]=useState(""),[compareError,setCompareError]=useState("");
  const [watchRuns,setWatchRuns]=useState<Record<number,any>>({}),[watchBusy,setWatchBusy]=useState<number|null>(null);
+ const [accountEmail,setAccountEmail]=useState(""),[accountPassword,setAccountPassword]=useState(""),[accountToken,setAccountToken]=useState(sessionStorage.getItem("tdm_user_access")||"");
+ const [organizations,setOrganizations]=useState<any[]>([]),[organizationId,setOrganizationId]=useState(sessionStorage.getItem("tdm_organization_id")||""),[organizationName,setOrganizationName]=useState(""),[memberEmail,setMemberEmail]=useState(""),[memberRole,setMemberRole]=useState<"admin"|"member">("member"),[members,setMembers]=useState<any[]>([]),[orgUsage,setOrgUsage]=useState<any>(null),[orgError,setOrgError]=useState("");
 
  const loadHistory = async () => {
   try {
@@ -86,6 +88,41 @@ export default function App(){
     );
   }
 };
+ const loadOrganizations=async()=>{
+  if(!sessionStorage.getItem("tdm_user_access"))return;
+  try{const rows=await api<any[]>("/api/organizations");setOrganizations(rows);
+   const current=sessionStorage.getItem("tdm_organization_id")||"";
+   if(current&&!rows.some(o=>o.id===current)){sessionStorage.removeItem("tdm_organization_id");setOrganizationId("");}
+  }catch(e:any){setOrgError(e.message||"Could not load organizations");}
+ };
+ async function accountAction(action:"register"|"login"){
+  setOrgError("");
+  try{
+   if(action==="register")await api("/api/accounts/register",{method:"POST",body:JSON.stringify({email:accountEmail,password:accountPassword})});
+   const out=await api<any>("/api/accounts/login",{method:"POST",body:JSON.stringify({email:accountEmail,password:accountPassword})});
+   sessionStorage.setItem("tdm_user_access",out.access);setAccountToken(out.access);await loadOrganizations();
+  }catch(e:any){setOrgError(e.message||"Account action failed");}
+ }
+ async function createOrganizationNow(){
+  try{const org=await api<any>("/api/organizations",{method:"POST",body:JSON.stringify({name:organizationName})});setOrganizationName("");await loadOrganizations();chooseOrganization(org.id);}
+  catch(e:any){setOrgError(e.message||"Could not create organization");}
+ }
+ function chooseOrganization(id:string){
+  if(id){sessionStorage.setItem("tdm_organization_id",id);setOrganizationId(id);}
+  else{sessionStorage.removeItem("tdm_organization_id");setOrganizationId("");}
+  setMembers([]);setOrgUsage(null);setHistoryError("");loadHistory();loadWatch();
+ }
+ async function loadOrgDetails(){
+  if(!organizationId)return;
+  try{const [m,u]=await Promise.all([api<any[]>("/api/organizations/members"),api<any>("/api/organizations/usage")]);setMembers(m);setOrgUsage(u);}
+  catch(e:any){setOrgError(e.message||"Could not load organization details");}
+ }
+ async function addOrganizationMember(){
+  try{await api("/api/organizations/members",{method:"POST",body:JSON.stringify({email:memberEmail,role:memberRole})});setMemberEmail("");await loadOrgDetails();}
+  catch(e:any){setOrgError(e.message||"Could not add member");}
+ }
+ useEffect(()=>{loadOrganizations()},[]);
+ useEffect(()=>{loadOrgDetails()},[organizationId,accountToken]);
  const loadWatch=async()=>{
   try{
     const rows=await api<any[]>("/api/watchlist");setWatch(rows);
@@ -169,7 +206,7 @@ export default function App(){
    }catch{sessionStorage.removeItem("tdm_admin_access");setLoginOpen(true)}
  }
  const dep=analysis?.dependencies.find(d=>d.id===selected);
- const nav: Array<[string,string,LucideIcon]> = [["analyze","Analyze",Search],["results","Results",ShieldCheck],["report","Security report",FileText],["history","History",History],["compare","Compare",GitCompareArrows]];
+ const nav: Array<[string,string,LucideIcon]> = [["analyze","Analyze",Search],["results","Results",ShieldCheck],["report","Security report",FileText],["history","History",History],["compare","Compare",GitCompareArrows],["organizations","Organizations",Building2]];
  return <div className="app">
   <header className="topbar"><div className="brand"><div className="logo">T</div><div><b>Trust Dependency Mapper</b><span>Blockchain trust & blast-radius intelligence</span></div></div><button className="admin-btn" onClick={loadAdmin}><Activity size={16}/> Admin analytics</button></header>
   <div className="layout"><aside>{nav.map(([id,label,I])=><button className={tab===id?"nav active":"nav"} onClick={()=>setTab(id)} key={id}><I size={17}/>{label}</button>)}<div className="side-note"><b>Security principle</b><p>Map trust assumptions, prove them with evidence, and inspect what becomes reachable if a dependency changes.</p></div></aside>
@@ -201,6 +238,13 @@ export default function App(){
      <div className="history-list">{history.map(a=><button key={a.id} onClick={()=>{setAnalysis(a);setTab("results")}}><div><b>{a.inputLabel}</b><span>{a.inputType} {a.network?`Â· ${a.network}`:""} Â· {new Date(a.createdAt).toLocaleString()}</span></div><div><strong>{a.summary.dependencyCount}</strong><span>dependencies</span></div><div><strong className="red">{a.summary.critical+a.summary.high}</strong><span>critical/high</span></div><span>â†’</span></button>)}</div>
      {!history.length&&!historyError&&<div className="empty-state inline-empty"><History size={28}/><h3>No saved analyses yet</h3><p>Complete an analysis and it will appear here for this browser session.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}<div className="panel watch-panel"><div className="panel-title">Watchlist <small>{watch.length}</small></div>{watch.length?watch.map(w=><div className="watch-row" key={w.id}><div><b>{w.name}</b><span>{w.network||w.input_type} · {watchRuns[Number(w.id)]?.status||"idle"}</span><small>{watchRuns[Number(w.id)]?.message||"Not checked yet"}</small>{watchRuns[Number(w.id)]?.error&&<small className="red">{watchRuns[Number(w.id)].error}</small>}</div><span>{w.last_check_at?new Date(w.last_check_at).toLocaleString():"No successful check"}</span><button disabled={watchBusy===Number(w.id)||w.input_type!=="address"} onClick={()=>checkWatch(Number(w.id))}>{watchBusy===Number(w.id)?"Checking…":"Check now"}</button><button onClick={async()=>{try{const rows=await api<any[]>(`/api/watchlist/${w.id}/snapshots?limit=5`);setWatchRuns(old=>({...old,[Number(w.id)]:{...old[Number(w.id)],snapshots:rows}}))}catch{}}}>Snapshots</button>{watchRuns[Number(w.id)]?.snapshots&&<><small>{watchRuns[Number(w.id)].snapshots.length} saved snapshots · {watchRuns[Number(w.id)].snapshots[0]?.captured_at?new Date(watchRuns[Number(w.id)].snapshots[0].captured_at).toLocaleString():""}</small>{watchRuns[Number(w.id)].snapshots[0]?.diff?.summary&&<small>Latest diff: +{watchRuns[Number(w.id)].snapshots[0].diff.summary.added} added · −{watchRuns[Number(w.id)].snapshots[0].diff.summary.removed} removed · {watchRuns[Number(w.id)].snapshots[0].diff.summary.changed} changed</small>}</>}</div>):<div className="empty compact">Save an address analysis with Watch to track trust changes.</div>}</div></section>}
 
+    {tab==="organizations"&&<section><div className="section-head"><div><div className="eyebrow">TEAM WORKSPACE</div><h2>Organizations & plans</h2><p>Free workspaces include 10 analyses per month. Team plan limits are enforced server-side; paid upgrades require a configured billing provider.</p></div></div>
+     {!accountToken?<div className="panel org-panel"><h3>Create an account or sign in</h3><p>Accounts use email and password. Use at least 10 characters for a new password.</p><div className="org-form"><input placeholder="Email address" type="email" value={accountEmail} onChange={e=>setAccountEmail(e.target.value)}/><input placeholder="Password (10+ characters)" type="password" value={accountPassword} onChange={e=>setAccountPassword(e.target.value)}/><button onClick={()=>accountAction("register")}>Register & sign in</button><button className="primary" onClick={()=>accountAction("login")}>Sign in</button></div></div>
+     :<><div className="panel org-panel"><div className="panel-title">Workspace selector</div><div className="org-form"><select value={organizationId} onChange={e=>chooseOrganization(e.target.value)}><option value="">Personal / public mode</option>{organizations.map(o=><option key={o.id} value={o.id}>{o.name} · {o.role}</option>)}</select><input placeholder="New organization name" value={organizationName} onChange={e=>setOrganizationName(e.target.value)}/><button className="primary" onClick={createOrganizationNow} disabled={organizationName.trim().length<2}>Create organization</button><button onClick={()=>{sessionStorage.removeItem("tdm_user_access");sessionStorage.removeItem("tdm_organization_id");setAccountToken("");setOrganizationId("");setOrganizations([]);}}>Sign out</button></div></div>
+     {organizationId&&<><div className="stats">{orgUsage&&<><Stat n={orgUsage.plan} l="Current plan"/><Stat n={orgUsage.subscriptionStatus} l="Subscription state"/><Stat n={`${orgUsage.analyses}/${orgUsage.limit}`} l="Analyses this month"/></>}</div><div className="panel org-panel"><div className="panel-title">Members & roles <small>{members.length}</small></div><div className="org-form"><input placeholder="Existing account email" type="email" value={memberEmail} onChange={e=>setMemberEmail(e.target.value)}/><select value={memberRole} onChange={e=>setMemberRole(e.target.value as "admin"|"member")}><option value="member">Member</option><option value="admin">Admin</option></select><button onClick={addOrganizationMember} disabled={!memberEmail.includes("@")}>Add member</button></div>{members.map(m=><div className="org-member" key={m.id}><span>{m.email}</span>{m.role==="owner"?<b>owner</b>:<><select defaultValue={m.role} onChange={async e=>{try{await api(`/api/organizations/members/${m.id}`,{method:"PATCH",body:JSON.stringify({role:e.target.value})});await loadOrgDetails()}catch(err:any){setOrgError(err.message)}}}><option value="member">member</option><option value="admin">admin</option></select><button onClick={async()=>{try{await api(`/api/organizations/members/${m.id}`,{method:"DELETE"});await loadOrgDetails()}catch(err:any){setOrgError(err.message)}}}>Remove</button></>}</div>)}</div></>}
+     </>}
+     {orgError&&<div className="error page-error"><AlertTriangle size={16}/>{orgError}</div>}
+    </section>}
     {tab==="compare"&&<section><div className="section-head"><div><div className="eyebrow">TRUST DIFF</div><h2>Compare two analyses</h2><p>Compare dependency identity, severity, confidence and capabilities.</p></div></div>{history.length>=2?<div className="compare-picker"><select id="before" defaultValue={history[0]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} Â· {new Date(a.createdAt).toLocaleString()}</option>)}</select><span>â†’</span><select id="after" defaultValue={history[1]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} Â· {new Date(a.createdAt).toLocaleString()}</option>)}</select><button className="primary" onClick={compareNow}>Compare</button></div>:<div className="empty-state inline-empty"><GitCompareArrows size={28}/><h3>Two analyses are required</h3><p>Analyze a contract or repository twice (or analyze two different targets) to compare dependency changes.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}
      {compareError&&<div className="error page-error"><AlertTriangle size={16}/>{compareError}</div>}{compare&&<div className="panel compare"><div className="stats"><Stat n={compare.summary.added} l="Added"/><Stat n={compare.summary.removed} l="Removed"/><Stat n={compare.summary.changed} l="Changed"/><Stat n={compare.summary.riskDelta>0?`+${compare.summary.riskDelta}`:compare.summary.riskDelta} l="Severity-weight delta" bad={compare.summary.riskDelta>0}/></div><CompareSection title="Added" items={compare.added}/><CompareSection title="Removed" items={compare.removed}/>{compare.changed.map((x:any)=><div className="diffrow" key={x.after.id}><span className="tag">CHANGED</span><b>{x.after.name}</b><span>{x.before.severity} â†’ {x.after.severity}</span></div>)}</div>}</section>}
 

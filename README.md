@@ -23,6 +23,9 @@ This is a production-oriented starter, not a claim of formal security correctnes
 - **Upgrade diff**: compare two analyses and identify added/removed/changed trust dependencies.
 - **Evidence explorer**: every discovered dependency can show its source/ABI/bytecode evidence.
 - **Runtime watchlist**: re-check tracked contracts, compare dependency graph snapshots, retain immutable history, and expose check status, progress, retry attempts, and failures.
+- **Organization workspaces**: signed user accounts, owner/admin/member roles, organization-scoped analyses and watchlists, and server-side quotas.
+- **Plan enforcement**: free organizations receive 10 analyses per calendar month; team organizations receive 250 when a verified subscription webhook activates the plan.
+- **Billing webhook adapter**: optional HMAC-SHA256 verification, replay/idempotency protection, and subscription-state updates. A payment-provider checkout is not bundled; connect a provider adapter before taking payments.
 - **Admin analytics**: anonymous usage counters, analysis success/failure, networks, input types, latency. No wallet/private-key data is collected.
 - **Audit log**: analysis lifecycle logs for each run.
 
@@ -97,7 +100,7 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - `GET /api/analyses/:id`
 - `POST /api/compare`
 - `POST /api/watchlist`
-- `GET /api/watchlist`
+- `POST /api/accounts/register` and `POST /api/accounts/login`\n- `POST /api/organizations` and `GET /api/organizations`\n- `GET /api/organizations/members`, `POST /api/organizations/members`, `PATCH /api/organizations/members/:userId`, `DELETE /api/organizations/members/:userId`\n- `GET /api/organizations/usage`\n- `POST /api/billing/webhook` (signed HMAC event adapter; disabled unless secret configured)\n- `GET /api/watchlist`
 - `POST /api/watchlist/:id/check` — retry-backed runtime analysis, baseline comparison, and persisted snapshot
 - `GET /api/watchlist/:id/status` — latest run status and progress
 - `GET /api/watchlist/:id/snapshots?limit=20` — recent immutable snapshots with graph diffs
@@ -112,7 +115,7 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - RPC calls use timeouts and bounded exponential backoff for transient failures.
 - Runtime monitoring stores historical snapshots and explicitly reports failed or unavailable checks; it does not claim unsupported trace capabilities are available on every RPC provider.
 - The service never asks for seed phrases or private keys.
-- Admin analytics are protected by `ADMIN_TOKEN`.
+- Admin analytics are protected by authenticated admin JWTs.\n- Organization resources require a signed user token and organization membership; owner/admin/member roles are checked on the backend.\n- Organization analyses and watchlists are scoped by organization ID; quota counters are incremented and checked server-side.\n- Billing webhook processing is disabled until a secret is configured and rejects invalid signatures and duplicate event IDs.
 - User identity is represented by an anonymous browser/session identifier.
 ## v0.2 analysis-engine upgrades
 
