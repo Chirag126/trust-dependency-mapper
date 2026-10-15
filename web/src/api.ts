@@ -74,6 +74,30 @@ export async function api<T>(url: string, options: RequestInit = {}): Promise<T>
     }
   }
 
+  if (response.status === 401 && token && sessionStorage.getItem("tdm_user_refresh") && !url.startsWith("/api/accounts/login") && !url.startsWith("/api/accounts/refresh") && !url.startsWith("/api/accounts/logout")) {
+    try {
+      const refreshedResponse = await fetch(`${base}/api/accounts/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ refresh: sessionStorage.getItem("tdm_user_refresh") })
+      });
+      const refreshed = await readBody(refreshedResponse);
+      if (refreshedResponse.ok && refreshed.access && refreshed.refresh) {
+        sessionStorage.setItem("tdm_user_access", refreshed.access);
+        sessionStorage.setItem("tdm_user_refresh", refreshed.refresh);
+        headers.set("Authorization", `Bearer ${refreshed.access}`);
+        response = await fetch(target, { ...options, headers });
+        data = await readBody(response);
+      } else {
+        sessionStorage.removeItem("tdm_user_access");
+        sessionStorage.removeItem("tdm_user_refresh");
+        sessionStorage.removeItem("tdm_organization_id");
+      }
+    } catch {
+      // Preserve the original authorization error if refresh cannot reach the API.
+    }
+  }
+
   if (!response.ok) {
     if (response.status === 404 && url.startsWith("/api/")) {
       const bodyError = typeof data.error === "string" && !data.error.startsWith("<!DOCTYPE")
