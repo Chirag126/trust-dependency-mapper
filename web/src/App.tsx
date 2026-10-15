@@ -1,8 +1,9 @@
 ﻿import React,{useEffect,useMemo,useState} from "react";
-import { Search, GitBranch, Upload, ShieldCheck, Activity, History, GitCompareArrows, Eye, AlertTriangle, CheckCircle2, Network, RefreshCw, Radar, FileDiff, LogIn } from "lucide-react";
+import { Search, GitBranch, Upload, ShieldCheck, Activity, History, GitCompareArrows, Eye, AlertTriangle, CheckCircle2, Network, RefreshCw, Radar, FileDiff, LogIn, FileText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { api } from "./api";
 import Graph from "./components/Graph";
+import ReportPanel from "./components/ReportPanel";
 import { Analysis } from "./types";
 
 const sev=(s:string)=>s==="critical"?"sev-critical":s==="high"?"sev-high":s==="medium"?"sev-medium":"sev-low";
@@ -155,7 +156,7 @@ export default function App(){
    }catch{sessionStorage.removeItem("tdm_admin_access");setLoginOpen(true)}
  }
  const dep=analysis?.dependencies.find(d=>d.id===selected);
- const nav: Array<[string,string,LucideIcon]> = [["analyze","Analyze",Search],["results","Results",ShieldCheck],["history","History",History],["compare","Compare",GitCompareArrows]];
+ const nav: Array<[string,string,LucideIcon]> = [["analyze","Analyze",Search],["results","Results",ShieldCheck],["report","Security report",FileText],["history","History",History],["compare","Compare",GitCompareArrows]];
  return <div className="app">
   <header className="topbar"><div className="brand"><div className="logo">T</div><div><b>Trust Dependency Mapper</b><span>Blockchain trust & blast-radius intelligence</span></div></div><button className="admin-btn" onClick={loadAdmin}><Activity size={16}/> Admin analytics</button></header>
   <div className="layout"><aside>{nav.map(([id,label,I])=><button className={tab===id?"nav active":"nav"} onClick={()=>setTab(id)} key={id}><I size={17}/>{label}</button>)}<div className="side-note"><b>Security principle</b><p>Map trust assumptions, prove them with evidence, and inspect what becomes reachable if a dependency changes.</p></div></aside>
@@ -171,7 +172,7 @@ export default function App(){
     </section>}
 
     {tab==="results"&&!analysis&&<section className="page-empty"><div className="empty-state"><ShieldCheck size={34}/><h2>No analysis results yet</h2><p>Run a contract, GitHub repository, or ZIP analysis first. Your results will appear here.</p><button className="primary" onClick={()=>setTab("analyze")}>Go to Analyze <span>â†’</span></button></div></section>}
-    {tab==="results"&&analysis&&<section><div className="section-head"><div><div className="eyebrow">ANALYSIS COMPLETE</div><h2>{analysis.inputLabel}</h2><p>{analysis.network||analysis.inputType} Â· {new Date(analysis.createdAt).toLocaleString()} Â· {analysis.durationMs} ms</p></div><div className="actions"><button onClick={saveWatch}><Eye size={15}/> Watch</button><button onClick={()=>setTab("analyze")}>New analysis</button></div></div>
+    {tab==="results"&&analysis&&<section><div className="section-head"><div><div className="eyebrow">ANALYSIS COMPLETE</div><h2>{analysis.inputLabel}</h2><p>{analysis.network||analysis.inputType} Â· {new Date(analysis.createdAt).toLocaleString()} Â· {analysis.durationMs} ms</p></div><div className="actions"><button onClick={saveWatch}><Eye size={15}/> Watch</button><button onClick={()=>setTab("report")}><FileText size={15}/> Security report</button><button onClick={()=>setTab("analyze")}>New analysis</button></div></div>
      <div className="stats"><Stat n={analysis.summary.dependencyCount} l="Dependencies"/><Stat n={analysis.summary.critical} l="Critical" bad/><Stat n={analysis.summary.high} l="High" bad/><Stat n={analysis.summary.privilegedControls} l="Privileged controls"/><Stat n={analysis.summary.upgradeable?"YES":"NO"} l="Upgradeable"/></div>
      <div className="result-grid"><div className="panel graph-panel"><div className="panel-title"><span>Trust dependency graph</span><small>Drag â€¢ zoom â€¢ click</small></div><Graph analysis={analysis} onSelect={selectDependency}/></div>
       <div className="panel inspector">{dep?<><div className="panel-title"><span>Dependency detail</span><button onClick={()=>setSelected(null)}>Ã—</button></div><h3>{dep.name}</h3><div className="tag-row"><span className={sev(dep.severity)}>{dep.severity}</span><span className="tag">{dep.type}</span><span className="tag">{Math.round(dep.confidence*100)}% confidence</span></div><h4>Capabilities</h4><ul>{dep.capabilities.map(x=><li key={x}>{x}</li>)}</ul><h4>Evidence</h4>{dep.evidence.map((e,i)=><div className="evidence" key={i}><b>{e.source}</b><span>{e.reason}</span>{e.function&&<code>{e.function}</code>}{e.value&&<code>{e.value}</code>}{e.file&&<code>{e.file}{e.line?`:${e.line}`:""}</code>}</div>)}{blast&&<><h4>Blast radius</h4><div className="blast"><strong>{blast.reachableNodes.length}</strong><span>reachable graph nodes</span><p>{blast.explanation}</p></div></>}</>:<div className="empty"><Network size={28}/><b>Select a node</b><span>Inspect evidence and the discovered blast radius.</span></div>}</div>
@@ -180,6 +181,8 @@ export default function App(){
       <div className="panel"><div className="panel-title">Analysis log <small>run trace</small></div><div className="logs">{analysis.logs.map((l,i)=><div key={i}><time>{new Date(l.ts).toLocaleTimeString()}</time><span className={`dot ${l.level}`}></span><span>{l.message}</span></div>)}</div></div></div>
      <div className="panel details"><div className="panel-title">Engine metadata <small>what the engine actually inspected</small></div><div className="meta-grid">{Object.entries(analysis.metadata||{}).map(([k,v])=><div key={k}><span>{k}</span><code>{typeof v==="object"?JSON.stringify(v):String(v)}</code></div>)}</div></div>
     </section>}
+
+    {tab==="report"&&<ReportPanel analysis={analysis}/>}
 
     {tab==="history"&&<section><div className="section-head"><div><div className="eyebrow">HISTORY</div><h2>Previous analyses</h2><p>Server-side history for this anonymous browser session.</p></div></div>{historyError&&<div className="error page-error"><AlertTriangle size={16}/>{historyError}<button onClick={loadHistory}>Retry</button></div>}
      <div className="history-list">{history.map(a=><button key={a.id} onClick={()=>{setAnalysis(a);setTab("results")}}><div><b>{a.inputLabel}</b><span>{a.inputType} {a.network?`Â· ${a.network}`:""} Â· {new Date(a.createdAt).toLocaleString()}</span></div><div><strong>{a.summary.dependencyCount}</strong><span>dependencies</span></div><div><strong className="red">{a.summary.critical+a.summary.high}</strong><span>critical/high</span></div><span>â†’</span></button>)}</div>
