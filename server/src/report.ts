@@ -72,6 +72,23 @@ export function buildSecurityReport(a: Analysis): SecurityReport {
   if (a.metadata && typeof a.metadata === "object" && "runtimeTrace" in a.metadata && !a.metadata.runtimeTrace) {
     limitations.push("Runtime tracing was not confirmed by the analysis metadata.");
   }
+  const metadata = a.metadata && typeof a.metadata === "object" ? a.metadata as Record<string, unknown> : {};
+  if (metadata.traceSupported === false) {
+    const attempts = typeof metadata.traceAttempts === "number" ? metadata.traceAttempts : 0;
+    limitations.push(`RPC trace support was not confirmed (${attempts} supported read-only getter trace attempt(s)); missing trace output is not evidence that no external calls exist. Full transaction tracing is not claimed.`);
+  }
+  if (metadata.bytecodeHash) {
+    limitations.push(`Deployed bytecode fingerprint (keccak256): ${String(metadata.bytecodeHash)}. This fingerprint does not prove verified-source equivalence or source-to-bytecode matching.`);
+  }
+  if (metadata.block !== undefined) {
+    limitations.push(`Observed block number: ${String(metadata.block)}. This result describes the observed state, not a guarantee about later blocks.`);
+  }
+  if (metadata.evidencePolicy && typeof metadata.evidencePolicy === "object") {
+    limitations.push("Evidence interpretation: direct RPC/storage/ABI/compiler observations are distinct from source-pattern/opcode heuristics. Heuristics are candidates, not proof of exploitability; missing evidence must not be interpreted as evidence of absence.");
+  }
+  if (a.inputType === "github" && !metadata.sourceRevision) {
+    limitations.push("The GitHub source revision SHA was not captured for this analysis; results are not pinned to an immutable repository commit.");
+  }
 
   const scenarios = findings.slice(0, 5).map(f =>
     `${f.title}: ${f.description} Scenario to validate: determine whether the cited behavior can be reached by an untrusted caller under the deployed configuration. Evidence: ${evidenceText(f.evidence) || "No evidence detail was attached to this finding."}`

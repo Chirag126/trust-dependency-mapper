@@ -196,6 +196,15 @@ npm test
 
 The self-test compiles a Solidity fixture and checks owner/oracle/upgrade/delegatecall discovery and analysis logging.
 
+## Evidence interpretation
+
+- **Observed facts** should be tied to direct RPC/storage/ABI/compiler evidence (for example, an observed block number or a populated EIP-1967 slot).
+- **Heuristic candidates** include source keyword/pattern matches and bytecode opcode presence. These are leads for review, not proof that a provider is integrated, a proxy is active, or an exploit is reachable.
+- **Missing evidence is not evidence of absence.** A failed or unsupported RPC trace must not be interpreted as proof that no external calls exist.
+- Address analyses report the observed block and deployed bytecode keccak256 fingerprint when available. A hash is a reproducible fingerprint, not verified-source equivalence.
+- GitHub analysis currently reads the repository's default branch/archive but does not pin the result to an immutable commit SHA. Treat the analyzed source revision as unverified until revision capture is implemented.
+- Reports disclose these boundaries and the available trace metadata instead of implying unsupported capabilities.
+
 ## Limitations
 
 - No static analyzer can prove protocol security.

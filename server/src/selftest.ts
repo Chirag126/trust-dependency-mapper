@@ -6,6 +6,7 @@ import { analyzeFiles } from "./analyzer";
 import { createUser, createOrganization, getMembership, addMember, orgUsage, reserveOrgAnalysis, saveBillingEvent, saveAnalysis, getAnalysisForUser, getAnalysis, saveWatch, getWatch, listWatch, createUserSession, rotateUserSession, isUserSessionActive, revokeUserSession, changeMemberRole, isBillingEventProcessed, markBillingEventProcessed } from "./db";
 import { withRetry } from "./chain";
 import { buildSarif } from "./sarif";
+import { buildSecurityReport } from "./report";
 import { mergeSlitherJson } from "./toolImport";
 import { userLogin, userRefresh, requireUser, userLogout } from "./auth";
 
@@ -112,6 +113,11 @@ contract Test {
     typeof a.metadata.compilerAvailable === "boolean",
     "compiler availability should be explicit"
   );
+  assert.ok(a.metadata.evidencePolicy && typeof a.metadata.evidencePolicy === "object", "analysis should explain how to interpret heuristic evidence");
+  const report = buildSecurityReport({ ...a, inputType: "github", metadata: { ...a.metadata, traceSupported: false, traceAttempts: 2, bytecodeHash: "0xfixture", block: 123 } });
+  assert.ok(report.limitations.some(x => x.includes("missing trace output is not evidence")), "report must distinguish missing trace evidence from evidence of absence");
+  assert.ok(report.limitations.some(x => x.includes("not pinned to an immutable repository commit")), "report must disclose missing GitHub source revision");
+  assert.ok(report.limitations.some(x => x.includes("bytecode fingerprint")), "report must explain bytecode hash limitations");
 
   // Run analysis against each standalone Solidity fixture.
   const fixtures = [
