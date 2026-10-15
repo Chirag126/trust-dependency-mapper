@@ -15,3 +15,15 @@ export const config = {
     base: process.env.RPC_BASE || ""
   }
 };
+
+if (process.env.NODE_ENV === "production") {
+  if (!process.env.ADMIN_JWT_SECRET || process.env.ADMIN_JWT_SECRET.length < 32 || /replace-with|change-me|example|your-secret/i.test(process.env.ADMIN_JWT_SECRET) || process.env.ADMIN_JWT_SECRET === "development-secret-change-this-32-bytes-min") {
+    throw new Error("Production startup requires a unique ADMIN_JWT_SECRET of at least 32 characters.");
+  }
+  if (!process.env.ADMIN_PASSWORD || process.env.ADMIN_PASSWORD === "change-me") {
+    throw new Error("Production startup requires a non-default ADMIN_PASSWORD.");
+  }
+  if (!process.env.CORS_ORIGIN) {
+    throw new Error("Production startup requires an explicit CORS_ORIGIN.");
+  }
+}

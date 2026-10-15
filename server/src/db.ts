@@ -76,6 +76,7 @@ CREATE TABLE IF NOT EXISTS refresh_tokens (
 `);
 try { db.exec("ALTER TABLE analyses ADD COLUMN organization_id TEXT"); } catch {}
 try { db.exec("ALTER TABLE watchlist ADD COLUMN organization_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE watchlist ADD COLUMN owner_session TEXT NOT NULL DEFAULT 'legacy'"); } catch {}
 
 
 function scryptHash(password: string, salt = crypto.randomBytes(16).toString("hex")) {
@@ -120,22 +121,26 @@ export function consumeRefreshToken(raw: string) {
 }
 
 export function saveAnalysis(a: Analysis, session: string, organizationId?: string) {
-  db.prepare(`INSERT OR REPLACE INTO analyses
+  const result=db.prepare(`INSERT INTO analyses
     (id,created_at,input_type,input_label,network,status,duration_ms,analysis_json,anonymous_session,organization_id)
-    VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session,@organizationId)`)
+    VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session,@organizationId)
+    ON CONFLICT(id) DO UPDATE SET created_at=excluded.created_at,input_type=excluded.input_type,input_label=excluded.input_label,
+      network=excluded.network,status=excluded.status,duration_ms=excluded.duration_ms,analysis_json=excluded.analysis_json,
+      anonymous_session=excluded.anonymous_session,organization_id=excluded.organization_id
+    WHERE analyses.organization_id IS excluded.organization_id AND (analyses.organization_id IS NOT NULL OR analyses.anonymous_session=excluded.anonymous_session)`)
     .run({ id:a.id, createdAt:a.createdAt, inputType:a.inputType, inputLabel:a.inputLabel, network:a.network||null,
       status:a.status, durationMs:a.durationMs, json:JSON.stringify(a), session, organizationId:organizationId||null });
+  if(Number(result.changes)!==1)throw new Error("Analysis already exists or access is denied");
   db.prepare(`INSERT INTO events(created_at,event,input_type,network,duration_ms,status,anonymous_session,metadata_json)
     VALUES(?,?,?,?,?,?,?,?)`).run(new Date().toISOString(),"analysis_completed",a.inputType,a.network||null,a.durationMs,a.status,session,JSON.stringify({...a.metadata,organizationId:organizationId||null}));
 }
-
 export function logEvent(event: string, session: string, metadata: Record<string, unknown> = {}) {
   db.prepare(`INSERT INTO events(created_at,event,anonymous_session,metadata_json) VALUES(?,?,?,?)`)
     .run(new Date().toISOString(), event, session, JSON.stringify(metadata));
 }
 
-export function getAnalysis(id:string):Analysis|null {
- const row=db.prepare("SELECT analysis_json FROM analyses WHERE id=? AND organization_id IS NULL").get(id) as any;
+export function getAnalysis(id:string, session="anon"):Analysis|null {
+ const row=db.prepare("SELECT analysis_json FROM analyses WHERE id=? AND organization_id IS NULL AND anonymous_session=?").get(id,session) as any;
  return row?JSON.parse(row.analysis_json):null;
 }
 export function getAnalysisOrganization(id:string):string|null {
@@ -143,15 +148,11 @@ export function getAnalysisOrganization(id:string):string|null {
  return row?.organization_id||null;
 }
 export function getAnalysisForUser(id:string,userId:string):Analysis|null {
- const row=db.prepare("SELECT a.analysis_json FROM analyses a LEFT JOIN organization_members m ON m.organization_id=a.organization_id AND m.user_id=? WHERE a.id=? AND (a.organization_id IS NULL OR m.user_id IS NOT NULL)").get(userId,id) as any;
+ const row=db.prepare("SELECT a.analysis_json FROM analyses a JOIN organization_members m ON m.organization_id=a.organization_id AND m.user_id=? WHERE a.id=? AND a.organization_id IS NOT NULL").get(userId,id) as any;
  return row?JSON.parse(row.analysis_json):null;
 }
-export function listAnalyses(limit=50):Analysis[] {
- const rows=db.prepare("SELECT analysis_json FROM analyses WHERE organization_id IS NULL ORDER BY created_at DESC LIMIT ?").all(limit) as any[];
- return rows.map(r=>JSON.parse(r.analysis_json));
-}
-export function listAnalysesForUser(userId:string,limit=50):Analysis[] {
- const rows=db.prepare("SELECT a.analysis_json FROM analyses a LEFT JOIN organization_members m ON m.organization_id=a.organization_id AND m.user_id=? WHERE a.organization_id IS NULL OR m.user_id IS NOT NULL ORDER BY a.created_at DESC LIMIT ?").all(userId,limit) as any[];
+export function listAnalyses(session="anon",limit=50):Analysis[] {
+ const rows=db.prepare("SELECT analysis_json FROM analyses WHERE organization_id IS NULL AND anonymous_session=? ORDER BY created_at DESC LIMIT ?").all(session,limit) as any[];
  return rows.map(r=>JSON.parse(r.analysis_json));
 }
 export function listOrganizationAnalyses(orgId:string,userId:string,limit=50):Analysis[] {
@@ -175,18 +176,18 @@ export function analytics() {
   return { totalAnalyses: total, completed, partial, failed: total - completed - partial, uniqueUsers, avgDurationMs: Math.round(avgMs), last24h, last7d, byInput, byNetwork, events };
 }
 
-export function saveWatch(name:string,inputType:string,inputLabel:string,network:string|undefined,baseline:Analysis,organizationId?:string) {
- const result=db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json,organization_id) VALUES(?,?,?,?,?,?,?)`)
- .run(new Date().toISOString(),name,inputType,inputLabel,network||null,JSON.stringify(baseline),organizationId||null);
+export function saveWatch(name:string,inputType:string,inputLabel:string,network:string|undefined,baseline:Analysis,organizationId?:string,ownerSession="anon") {
+ const result=db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json,organization_id,owner_session) VALUES(?,?,?,?,?,?,?,?)`)
+ .run(new Date().toISOString(),name,inputType,inputLabel,network||null,JSON.stringify(baseline),organizationId||null,ownerSession);
  return Number(result.lastInsertRowid);
 }
-export function listWatch(organizationId?:string) {
+export function listWatch(organizationId?:string,ownerSession="anon") {
  return organizationId ? db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id=? ORDER BY id DESC").all(organizationId)
- : db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id IS NULL ORDER BY id DESC").all();
+ : db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id IS NULL AND owner_session=? ORDER BY id DESC").all(ownerSession);
 }
-export function getWatch(id:number,organizationId?:string) {
- return organizationId ? db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id=?").get(id,organizationId) as any
- : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL").get(id) as any;
+export function getWatch(id:number,organizationId?:string,ownerSession="anon") {
+ return (organizationId ? db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id=?").get(id,organizationId)
+ : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL AND owner_session=?").get(id,ownerSession)) as any ?? null;
 }
 export function updateWatch(id: number, baseline: Analysis) {
   db.prepare("UPDATE watchlist SET baseline_json=?,last_check_at=? WHERE id=?").run(JSON.stringify(baseline), new Date().toISOString(), id);
@@ -243,6 +244,11 @@ CREATE TABLE IF NOT EXISTS users (
  id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
  created_at TEXT NOT NULL, disabled INTEGER NOT NULL DEFAULT 0
 );
+CREATE TABLE IF NOT EXISTS user_sessions (
+ id TEXT PRIMARY KEY, user_id TEXT NOT NULL, refresh_token_hash TEXT UNIQUE NOT NULL,
+ expires_at TEXT NOT NULL, revoked_at TEXT, created_at TEXT NOT NULL,
+ FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+);
 CREATE TABLE IF NOT EXISTS organizations (
  id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT UNIQUE NOT NULL,
  plan TEXT NOT NULL DEFAULT 'free', subscription_status TEXT NOT NULL DEFAULT 'inactive',
@@ -284,6 +290,35 @@ export function verifyUser(email:string,password:string) {
  const row=db.prepare("SELECT id,email,password_hash,disabled FROM users WHERE email=?").get(email.trim().toLowerCase()) as any;
  if(!row||row.disabled||!userPasswordVerify(password,row.password_hash))return null;
  return {id:row.id,email:row.email};
+}
+export function createUserSession(userId:string,rawRefresh:string,expiresAt:string) {
+ const id=crypto.randomUUID(),now=new Date().toISOString();
+ const hash=crypto.createHash("sha256").update(rawRefresh).digest("hex");
+ db.prepare("INSERT INTO user_sessions(id,user_id,refresh_token_hash,expires_at,created_at) VALUES(?,?,?,?,?)").run(id,userId,hash,expiresAt,now);
+ return id;
+}
+export function rotateUserSession(rawRefresh:string,nextRefresh:string,expiresAt:string) {
+ const hash=crypto.createHash("sha256").update(rawRefresh).digest("hex");
+ const nextHash=crypto.createHash("sha256").update(nextRefresh).digest("hex");
+ db.exec("BEGIN IMMEDIATE");
+ try {
+  const row=db.prepare("SELECT s.id,s.user_id,s.expires_at,u.email,u.disabled FROM user_sessions s JOIN users u ON u.id=s.user_id WHERE s.refresh_token_hash=? AND s.revoked_at IS NULL").get(hash) as any;
+  if(!row||row.disabled||new Date(row.expires_at)<=new Date()){db.exec("ROLLBACK");return null;}
+  const result=db.prepare("UPDATE user_sessions SET refresh_token_hash=?,expires_at=? WHERE id=? AND refresh_token_hash=? AND revoked_at IS NULL").run(nextHash,expiresAt,row.id,hash);
+  if(Number(result.changes)!==1){db.exec("ROLLBACK");return null;}
+  db.exec("COMMIT");
+  return {id:row.id,user:{id:row.user_id,email:row.email}};
+ } catch(error) { db.exec("ROLLBACK"); throw error; }
+}
+export function isUserSessionActive(sessionId:string,userId:string) {
+ return !!db.prepare("SELECT id FROM user_sessions WHERE id=? AND user_id=? AND revoked_at IS NULL AND expires_at>?").get(sessionId,userId,new Date().toISOString());
+}
+export function revokeUserSessionByRefresh(rawRefresh:string) {
+ const hash=crypto.createHash("sha256").update(rawRefresh).digest("hex");
+ return Number(db.prepare("UPDATE user_sessions SET revoked_at=? WHERE refresh_token_hash=? AND revoked_at IS NULL").run(new Date().toISOString(),hash).changes)>0;
+}
+export function revokeUserSession(sessionId:string,userId:string) {
+ return Number(db.prepare("UPDATE user_sessions SET revoked_at=? WHERE id=? AND user_id=? AND revoked_at IS NULL").run(new Date().toISOString(),sessionId,userId).changes)>0;
 }
 export function createOrganization(ownerId:string,name:string) {
  const slugBase=name.toLowerCase().normalize("NFKD").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"").slice(0,36)||"workspace";
@@ -333,11 +368,17 @@ export function orgUsage(orgId:string) {
  return {period,plan:org?.plan||"free",subscriptionStatus:org?.subscription_status||"inactive",analyses:row?.analyses||0,limit:limits[org?.plan]??10};
 }
 export function reserveOrgAnalysis(orgId:string) {
- const usage=orgUsage(orgId);
- if(usage.analyses>=usage.limit)throw new Error(`Monthly analysis quota reached (${usage.analyses}/${usage.limit}). Upgrade your plan or try next month.`);
- const period=usage.period;
- db.prepare("INSERT INTO organization_usage(organization_id,period,analyses) VALUES(?,?,1) ON CONFLICT(organization_id,period) DO UPDATE SET analyses=analyses+1").run(orgId,period);
- return usage;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const usage=orgUsage(orgId);
+    if(usage.analyses>=usage.limit)throw new Error(`Monthly analysis quota reached (${usage.analyses}/${usage.limit}). Upgrade your plan or try next month.`);
+    db.prepare("INSERT INTO organization_usage(organization_id,period,analyses) VALUES(?,?,1) ON CONFLICT(organization_id,period) DO UPDATE SET analyses=analyses+1").run(orgId,usage.period);
+    db.exec("COMMIT");
+    return usage;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 export function setOrganizationSubscription(orgId:string,plan:"free"|"team",status:string,customerId?:string|null,subscriptionId?:string|null) {
  db.prepare("UPDATE organizations SET plan=?,subscription_status=?,billing_customer_id=COALESCE(?,billing_customer_id),billing_subscription_id=COALESCE(?,billing_subscription_id) WHERE id=?")
@@ -347,6 +388,10 @@ export function saveBillingEvent(id:string,provider:string,type:string,payload:u
  const result=db.prepare("INSERT OR IGNORE INTO billing_events(id,provider,event_type,received_at,processed,payload_json) VALUES(?,?,?,?,0,?)")
  .run(id,provider,type,new Date().toISOString(),JSON.stringify(payload));
  return Number(result.changes)>0;
+}
+export function isBillingEventProcessed(id:string) {
+ const row=db.prepare("SELECT processed FROM billing_events WHERE id=?").get(id) as any;
+ return row?.processed===1;
 }
 export function markBillingEventProcessed(id:string) {
  db.prepare("UPDATE billing_events SET processed=1 WHERE id=?").run(id);
