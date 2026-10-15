@@ -57,7 +57,10 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   await expect(page.locator(".graph-panel")).toBeVisible();
   await expect(page.locator(".graph-panel svg g.node").first()).toBeVisible();
   await expect(page.locator(".lower-grid")).toBeVisible();
-  await page.locator(".graph-panel svg g.node").nth(1).click();
+  // D3 force simulation continuously updates node transforms, so Playwright's normal
+  // stability check can time out even though the node is clickable. Dispatch the
+  // click to the rendered SVG node and keep asserting the resulting inspector UI.
+  await page.locator(".graph-panel svg g.node").nth(1).dispatchEvent("click");
   await expect(page.getByText("Dependency detail")).toBeVisible();
   await expect(page.getByText("Blast radius")).toBeVisible();
   await expect(page.locator("aside").getByRole("button", { name: "Security report" })).toBeVisible();
