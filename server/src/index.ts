@@ -25,6 +25,7 @@ const app = express();
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json({ limit: "2mb", verify: (req:any, _res, buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(rateLimit({ windowMs: 60_000, max: 80, standardHeaders: true, legacyHeaders: false }));
+const authLimiter=rateLimit({windowMs:15*60_000,max:10,standardHeaders:true,legacyHeaders:false,message:{error:"Too many authentication attempts. Wait 15 minutes and retry."}});
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: config.maxZipMb * 1024 * 1024 } });
 function session(req: express.Request) {
   return safeSession(req.header("x-anonymous-session") || "anon");
@@ -58,17 +59,17 @@ async function orgContext(req:express.Request,res:express.Response,minimum:"memb
  if(rank[membership.role]<rank[minimum]){res.status(403).json({error:"Your organization role does not permit this action"});return null;}
  return {user,org,membership};
 }
-app.post("/api/accounts/register",(req,res)=>{
+app.post("/api/accounts/register",authLimiter,(req,res)=>{
  const p=z.object({email:z.string().email().max(254),password:z.string().min(10).max(200)}).safeParse(req.body);
  if(!p.success)return res.status(400).json({error:"Provide a valid email and password of at least 10 characters"});
  try { res.status(201).json(createUser(p.data.email,p.data.password)); } catch(e:any) { res.status(409).json({error:e.message||"Account creation failed"}); }
 });
-app.post("/api/accounts/login",async(req,res)=>{
+app.post("/api/accounts/login",authLimiter,async(req,res)=>{
  const p=z.object({email:z.string().email(),password:z.string().min(1)}).safeParse(req.body);
  if(!p.success)return res.status(400).json({error:"Email and password required"});
  const out=await userLogin(p.data.email,p.data.password); if(!out)return res.status(401).json({error:"Invalid credentials"}); res.json(out);
 });
-app.post("/api/accounts/refresh",async(req,res)=>{
+app.post("/api/accounts/refresh",authLimiter,async(req,res)=>{
  const p=z.object({refresh:z.string().min(20).max(256)}).safeParse(req.body);
  if(!p.success)return res.status(400).json({error:"Refresh token required"});
  const out=await userRefresh(p.data.refresh);
@@ -145,7 +146,7 @@ async function readableAnalysis(req:express.Request,id:string) {
 }
 
 app.get("/api/health", (_, res) => res.json({ ok: true, service: "trust-dependency-mapper", networks }));
-app.post("/api/auth/login", async (req, res) => {
+app.post("/api/auth/login", authLimiter, async (req, res) => {
   const p = z.object({ username: z.string().min(1), password: z.string().min(1) }).safeParse(req.body);
   if (!p.success) return res.status(400).json({ error: "Credentials required" });
   const out = await login(p.data.username, p.data.password);
@@ -191,11 +192,17 @@ function extractZip(buffer: Buffer) {
   const entries = zip.getEntries();
   if (entries.length > 1000) throw new Error("ZIP contains too many entries");
   const out: { path: string; content: string; }[] = [];
+  let extractedBytes=0;
   for (const e of entries) {
     if (e.isDirectory) continue; const n = path.posix.normalize(e.entryName.replace(/\\/g, "/"));
     if (n.startsWith("../") || n.includes("/../") || n.startsWith("/")) throw new Error("Unsafe ZIP path");
-    if (!/\.(sol|json)$/i.test(n)) continue; const data = e.getData();
-    if (data.length <= 1_000_000) out.push({ path: n, content: data.toString("utf8") });
+    if (!/\.(sol|json)$/i.test(n)) continue;
+    const declaredSize=Number((e as any).header?.size||0);
+    if(declaredSize>1_000_000)throw new Error("ZIP contains a file larger than the 1 MB per-file limit");
+    const data = e.getData();
+    extractedBytes+=data.length;
+    if(extractedBytes>10_000_000)throw new Error("ZIP extracted content exceeds the 10 MB total limit");
+    out.push({ path: n, content: data.toString("utf8") });
   } return out;
 }
 app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
@@ -270,7 +277,7 @@ app.post("/api/watchlist", async (req, res) => {
 });
 app.get("/api/watchlist", async (req,res)=>{
  const orgId=req.header("x-organization-id");
- if(orgId){const ctx=await orgContext(req,res);if(!ctx)return res.status(403).json({error:"Organization access required"});return res.json(listWatch(ctx.org.id));}
+ if(orgId){const ctx=await orgContext(req,res);if(!ctx)return;return res.json(listWatch(ctx.org.id));}
  res.json(listWatch(undefined,session(req)));
 });
 app.get("/api/watchlist/:id/status", async (req, res) => {
@@ -299,7 +306,7 @@ app.post("/api/watchlist/:id/check", async (req, res) => {
       () => analyzeAddress(w.input_label, w.network),
       { attempts: 3, baseDelayMs: 300, maxDelayMs: 1600, onRetry: (attempt, error) => {
         failedAttempts = attempt;
-        updateWatchRun(w.id, { attempts: attempt, progress: 15, message: `Attempt ${attempt} failed; backing off before retry`, error: error instanceof Error ? error.message : String(error) });
+        updateWatchRun(w.id, { attempts: attempt, progress: 15, message: `Attempt ${attempt} failed; backing off before retry`, error: "Transient RPC failure; retrying." });
       }}
     );
     updateWatchRun(w.id, { progress: 75, attempts: failedAttempts + 1, message: "Comparing current dependency graph with saved baseline", error: null });
