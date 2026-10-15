@@ -15,6 +15,7 @@ export default function App(){
  const [busy,setBusy]=useState(false),[error,setError]=useState(""),[compare,setCompare]=useState<any>(null),[blast,setBlast]=useState<any>(null);
  const [admin,setAdmin]=useState<any>(null),[audit,setAudit]=useState<any[]>([]),[loginOpen,setLoginOpen]=useState(false),[watch,setWatch]=useState<any[]>([]);
  const [historyError,setHistoryError]=useState(""),[compareError,setCompareError]=useState("");
+ const [watchRuns,setWatchRuns]=useState<Record<number,any>>({}),[watchBusy,setWatchBusy]=useState<number|null>(null);
 
  const loadHistory = async () => {
   try {
@@ -85,7 +86,19 @@ export default function App(){
     );
   }
 };
- const loadWatch=async()=>{try{setWatch(await api<any[]>("/api/watchlist"))}catch{}};
+ const loadWatch=async()=>{
+  try{
+    const rows=await api<any[]>("/api/watchlist");setWatch(rows);
+    const statuses=await Promise.all(rows.map(async w=>{try{return [Number(w.id),await api<any>(`/api/watchlist/${w.id}/status`)] as const}catch{return [Number(w.id),null] as const}}));
+    setWatchRuns(Object.fromEntries(statuses.filter(x=>x[1])));
+  }catch{}
+ };
+ async function checkWatch(id:number){
+  setWatchBusy(id);
+  try{await api(`/api/watchlist/${id}/check`,{method:"POST"});await loadWatch()}
+  catch(e:any){await loadWatch();setHistoryError(e?.message||"Watch check failed. See watch status for details.")}
+  finally{setWatchBusy(null)}
+ }
  useEffect(()=>{loadHistory();loadWatch()},[]);
  async function run(){
    setError("");
@@ -186,7 +199,7 @@ export default function App(){
 
     {tab==="history"&&<section><div className="section-head"><div><div className="eyebrow">HISTORY</div><h2>Previous analyses</h2><p>Server-side history for this anonymous browser session.</p></div></div>{historyError&&<div className="error page-error"><AlertTriangle size={16}/>{historyError}<button onClick={loadHistory}>Retry</button></div>}
      <div className="history-list">{history.map(a=><button key={a.id} onClick={()=>{setAnalysis(a);setTab("results")}}><div><b>{a.inputLabel}</b><span>{a.inputType} {a.network?`Â· ${a.network}`:""} Â· {new Date(a.createdAt).toLocaleString()}</span></div><div><strong>{a.summary.dependencyCount}</strong><span>dependencies</span></div><div><strong className="red">{a.summary.critical+a.summary.high}</strong><span>critical/high</span></div><span>â†’</span></button>)}</div>
-     {!history.length&&!historyError&&<div className="empty-state inline-empty"><History size={28}/><h3>No saved analyses yet</h3><p>Complete an analysis and it will appear here for this browser session.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}<div className="panel watch-panel"><div className="panel-title">Watchlist <small>{watch.length}</small></div>{watch.length?watch.map(w=><div className="watch-row" key={w.id}><b>{w.name}</b><span>{w.network||w.input_type}</span><span>{w.last_check_at?new Date(w.last_check_at).toLocaleString():"Not checked yet"}</span></div>):<div className="empty compact">Save an address analysis with Watch to track trust changes.</div>}</div></section>}
+     {!history.length&&!historyError&&<div className="empty-state inline-empty"><History size={28}/><h3>No saved analyses yet</h3><p>Complete an analysis and it will appear here for this browser session.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}<div className="panel watch-panel"><div className="panel-title">Watchlist <small>{watch.length}</small></div>{watch.length?watch.map(w=><div className="watch-row" key={w.id}><div><b>{w.name}</b><span>{w.network||w.input_type} · {watchRuns[Number(w.id)]?.status||"idle"}</span><small>{watchRuns[Number(w.id)]?.message||"Not checked yet"}</small>{watchRuns[Number(w.id)]?.error&&<small className="red">{watchRuns[Number(w.id)].error}</small>}</div><span>{w.last_check_at?new Date(w.last_check_at).toLocaleString():"No successful check"}</span><button disabled={watchBusy===Number(w.id)||w.input_type!=="address"} onClick={()=>checkWatch(Number(w.id))}>{watchBusy===Number(w.id)?"Checking…":"Check now"}</button><button onClick={async()=>{try{const rows=await api<any[]>(`/api/watchlist/${w.id}/snapshots?limit=5`);setWatchRuns(old=>({...old,[Number(w.id)]:{...old[Number(w.id)],snapshots:rows}}))}catch{}}}>Snapshots</button>{watchRuns[Number(w.id)]?.snapshots&&<><small>{watchRuns[Number(w.id)].snapshots.length} saved snapshots · {watchRuns[Number(w.id)].snapshots[0]?.captured_at?new Date(watchRuns[Number(w.id)].snapshots[0].captured_at).toLocaleString():""}</small>{watchRuns[Number(w.id)].snapshots[0]?.diff?.summary&&<small>Latest diff: +{watchRuns[Number(w.id)].snapshots[0].diff.summary.added} added · −{watchRuns[Number(w.id)].snapshots[0].diff.summary.removed} removed · {watchRuns[Number(w.id)].snapshots[0].diff.summary.changed} changed</small>}</>}</div>):<div className="empty compact">Save an address analysis with Watch to track trust changes.</div>}</div></section>}
 
     {tab==="compare"&&<section><div className="section-head"><div><div className="eyebrow">TRUST DIFF</div><h2>Compare two analyses</h2><p>Compare dependency identity, severity, confidence and capabilities.</p></div></div>{history.length>=2?<div className="compare-picker"><select id="before" defaultValue={history[0]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} Â· {new Date(a.createdAt).toLocaleString()}</option>)}</select><span>â†’</span><select id="after" defaultValue={history[1]?.id}>{history.map(a=><option value={a.id} key={a.id}>{a.inputLabel} Â· {new Date(a.createdAt).toLocaleString()}</option>)}</select><button className="primary" onClick={compareNow}>Compare</button></div>:<div className="empty-state inline-empty"><GitCompareArrows size={28}/><h3>Two analyses are required</h3><p>Analyze a contract or repository twice (or analyze two different targets) to compare dependency changes.</p><button className="primary" onClick={()=>setTab("analyze")}>Start an analysis</button></div>}
      {compareError&&<div className="error page-error"><AlertTriangle size={16}/>{compareError}</div>}{compare&&<div className="panel compare"><div className="stats"><Stat n={compare.summary.added} l="Added"/><Stat n={compare.summary.removed} l="Removed"/><Stat n={compare.summary.changed} l="Changed"/><Stat n={compare.summary.riskDelta>0?`+${compare.summary.riskDelta}`:compare.summary.riskDelta} l="Severity-weight delta" bad={compare.summary.riskDelta>0}/></div><CompareSection title="Added" items={compare.added}/><CompareSection title="Removed" items={compare.removed}/>{compare.changed.map((x:any)=><div className="diffrow" key={x.after.id}><span className="tag">CHANGED</span><b>{x.after.name}</b><span>{x.before.severity} â†’ {x.after.severity}</span></div>)}</div>}</section>}
