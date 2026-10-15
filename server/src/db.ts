@@ -186,8 +186,8 @@ export function listWatch(organizationId?:string,ownerSession="anon") {
  : db.prepare("SELECT id,created_at,name,input_type,input_label,network,last_check_at FROM watchlist WHERE organization_id IS NULL AND owner_session=? ORDER BY id DESC").all(ownerSession);
 }
 export function getWatch(id:number,organizationId?:string,ownerSession="anon") {
- return organizationId ? db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id=?").get(id,organizationId) as any
- : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL AND owner_session=?").get(id,ownerSession) as any;
+ return (organizationId ? db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id=?").get(id,organizationId)
+ : db.prepare("SELECT * FROM watchlist WHERE id=? AND organization_id IS NULL AND owner_session=?").get(id,ownerSession)) as any ?? null;
 }
 export function updateWatch(id: number, baseline: Analysis) {
   db.prepare("UPDATE watchlist SET baseline_json=?,last_check_at=? WHERE id=?").run(JSON.stringify(baseline), new Date().toISOString(), id);
