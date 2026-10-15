@@ -109,6 +109,9 @@ test("API integration: accounts, workspace isolation, analysis, reports, watchli
   assert.ok([200, 400, 503].includes(unavailableRpc.status), "unconfigured RPC must return a handled response");
   if (unavailableRpc.status === 503) assert.doesNotMatch(await unavailableRpc.text(), /stack|node_modules|C:\\\\|\/home\//i);
 
+  const validGithub = await request("/api/analyze/github", { method: "POST", body: JSON.stringify({ url: "https://github.com/Chirag126/trust-dependency-mapper" }) });
+  assert.ok([200, 429, 503].includes(validGithub.status), "valid GitHub URL must analyze or return a handled provider/rate-limit failure");
+  if (validGithub.status === 200) { const githubAnalysis = await json(validGithub); assert.ok(githubAnalysis.id && githubAnalysis.inputType === "github"); }
   const invalidGithub = await request("/api/analyze/github", { method: "POST", body: JSON.stringify({ url: "not a URL" }) });
   assert.equal(invalidGithub.status, 400);
   const zip = zipFixture();
@@ -159,4 +162,11 @@ test("API integration: accounts, workspace isolation, analysis, reports, watchli
   assert.equal(logout.status, 200);
   const afterLogout = await request("/api/organizations", {}, sessionA, rotatedOwner.access);
   assert.equal(afterLogout.status, 401);
+
+  const authFailures: number[] = [];
+  for (let i = 0; i < 5; i++) {
+    const response = await request("/api/accounts/login", { method: "POST", body: JSON.stringify({ email: "owner@example.test", password: "wrong-password" }) });
+    authFailures.push(response.status);
+  }
+  assert.ok(authFailures.includes(429), "repeated authentication failures must be rate limited");
 });
