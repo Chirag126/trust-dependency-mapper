@@ -73,6 +73,28 @@ contract Test {
       `${fixture.file}: compiler availability should be explicit`
     );
 
+    const nodeIds = new Set(result.nodes.map(node => node.id));
+    assert.equal(nodeIds.size, result.nodes.length, `${fixture.file}: graph node IDs must be unique`);
+    for (const edge of result.edges) {
+      assert.ok(nodeIds.has(edge.source), `${fixture.file}: graph edge source must exist: ${edge.source}`);
+      assert.ok(nodeIds.has(edge.target), `${fixture.file}: graph edge target must exist: ${edge.target}`);
+    }
+    const edgeKeys = result.edges.map(edge => JSON.stringify([
+      edge.source, edge.target, edge.relation,
+      (edge.evidence || []).map(e => JSON.stringify([
+        e.source, e.file ?? "", e.line ?? null, e.function ?? "",
+        e.selector ?? "", e.reason, e.value ?? ""
+      ])).sort()
+    ]));
+    assert.equal(new Set(edgeKeys).size, edgeKeys.length, `${fixture.file}: duplicate graph edges should be collapsed`);
+    for (const dependency of result.dependencies) {
+      const evidenceKeys = dependency.evidence.map(e => JSON.stringify([
+        e.source, e.file ?? "", e.line ?? null, e.function ?? "",
+        e.selector ?? "", e.reason, e.value ?? ""
+      ]));
+      assert.equal(new Set(evidenceKeys).size, evidenceKeys.length, `${fixture.file}: duplicate evidence should be collapsed for ${dependency.name}`);
+    }
+
     console.log(`Fixture analysis passed: ${fixture.file} (${result.status})`);
   }
 

@@ -15,18 +15,39 @@ function log(logs: any[], level: any, message: string) {
 function dep(name: string, type: any, severity: Severity, confidence: number, caps: string[], evidence: Evidence[], address?: string): Dependency {
   return { id: id("dep"), name, type, severity, confidence, capabilities: caps, evidence, address };
 }
-function dedupe(ds: Dependency[]) {
+function evidenceKey(e: Evidence) {
+  return JSON.stringify([
+    e.source, e.file ?? "", e.line ?? null, e.function ?? "",
+    e.selector ?? "", e.reason, e.value ?? ""
+  ]);
+}
+
+function dedupe(ds: Dependency[], links: { from: string; to: string; relation: string; evidence?: Evidence[] }[] = []) {
   const map = new Map<string, Dependency>();
+  const canonicalId = new Map<string, string>();
   for (const d of ds) {
-    const key = `${d.type}|${(d.address || d.name).toLowerCase()}`;
+    const address = d.address?.toLowerCase();
+    const key = `${d.type}|${address || d.name.trim().toLowerCase()}`;
     const old = map.get(key);
-    if (!old) map.set(key, d);
-    else {
+    if (!old) {
+      map.set(key, d);
+      canonicalId.set(d.id, d.id);
+      d.evidence = [...new Map(d.evidence.map(e => [evidenceKey(e), e])).values()];
+    } else {
+      canonicalId.set(d.id, old.id);
       if (severityRank(d.severity) > severityRank(old.severity)) old.severity = d.severity;
       old.confidence = Math.max(old.confidence, d.confidence);
       old.capabilities = [...new Set([...old.capabilities, ...d.capabilities])];
-      old.evidence.push(...d.evidence);
+      old.evidence = [...new Map([...old.evidence, ...d.evidence].map(e => [evidenceKey(e), e])).values()];
     }
+  }
+
+  // Links are collected before deduplication. Remap merged dependency IDs so graph
+  // relationships do not disappear when their original target was a duplicate.
+  for (const link of links) {
+    link.from = canonicalId.get(link.from) || link.from;
+    link.to = canonicalId.get(link.to) || link.to;
+    if (link.evidence) link.evidence = [...new Map(link.evidence.map(e => [evidenceKey(e), e])).values()];
   }
   return [...map.values()];
 }
@@ -42,7 +63,12 @@ function graph(root: string, ds: Dependency[], links: { from: string; to: string
   for (const l of links) {
     if (validIds.has(l.from) && validIds.has(l.to)) edges.push({ source: l.from, target: l.to, relation: l.relation, evidence: l.evidence });
   }
-  return { nodes, edges };
+  const edgeKey = (e: GraphEdge) => JSON.stringify([
+    e.source, e.target, e.relation,
+    (e.evidence || []).map(evidenceKey).sort()
+  ]);
+  const uniqueEdges = [...new Map(edges.map(e => [edgeKey(e), e])).values()];
+  return { nodes, edges: uniqueEdges };
 }
 
 type SourceFile = { path: string; content: string; };
@@ -363,7 +389,7 @@ async function analyzeText(files: { path: string; content: string; }[], label: s
     if (/\blatestRoundData\(\)/.test(joined)) deps.push(dep("Oracle interface", "oracle", "high", 0.9, ["price data"], [{ file: c.file, reason: "latestRoundData() in compiled ABI", source: "abi" }]));
     if (/\bproxiableUUID\(\)/.test(joined)) deps.push(dep("UUPS upgrade surface", "proxy", "critical", 0.94, ["change implementation"], [{ file: c.file, reason: "proxiableUUID() in ABI indicates UUPS-style compatibility.", source: "abi" }]));
   }
-  const final = dedupe(deps);
+  const final = dedupe(deps, links);
   const g = graph(label, final, links);
   const durationMs = Date.now() - started;
   const summary = { dependencyCount: final.length, critical: final.filter(x => x.severity === "critical").length, high: final.filter(x => x.severity === "high").length, medium: final.filter(x => x.severity === "medium").length, low: final.filter(x => x.severity === "low").length, privilegedControls: final.filter(x => ["admin", "owner", "multisig", "proxy"].includes(x.type)).length, upgradeable: final.some(x => x.type === "proxy") };
@@ -449,7 +475,7 @@ export async function analyzeAddress(address: string, network: Network): Promise
   if (hex.includes("f4")) deps.push(dep("DELEGATECALL surface", "external-contract", "medium", 0.55, ["external execution"], [{ reason: "DELEGATECALL opcode appears in bytecode; target must be established by tracing/source.", source: "bytecode" }]));
   if (hex.includes("fa")) deps.push(dep("STATICCALL surface", "external-contract", "low", 0.5, ["external reads"], [{ reason: "STATICCALL opcode appears in bytecode.", source: "bytecode" }]));
 
-  const final = dedupe(deps);
+  const final = dedupe(deps, links);
   const g = graph(root, final, links);
   const durationMs = Date.now() - started;
   const summary = { dependencyCount: final.length, critical: final.filter(x => x.severity === "critical").length, high: final.filter(x => x.severity === "high").length, medium: final.filter(x => x.severity === "medium").length, low: final.filter(x => x.severity === "low").length, privilegedControls: final.filter(x => ["admin", "owner", "multisig", "proxy"].includes(x.type)).length, upgradeable: final.some(x => x.type === "proxy") };
@@ -465,5 +491,4 @@ export async function analyzeGithub(owner: string, repo: string): Promise<Analys
   a.metadata = { ...a.metadata, github: { owner, repo }, filesRead: files.length };
   return a;
 }
-
 
