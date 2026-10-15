@@ -334,11 +334,17 @@ export function orgUsage(orgId:string) {
  return {period,plan:org?.plan||"free",subscriptionStatus:org?.subscription_status||"inactive",analyses:row?.analyses||0,limit:limits[org?.plan]??10};
 }
 export function reserveOrgAnalysis(orgId:string) {
- const usage=orgUsage(orgId);
- if(usage.analyses>=usage.limit)throw new Error(`Monthly analysis quota reached (${usage.analyses}/${usage.limit}). Upgrade your plan or try next month.`);
- const period=usage.period;
- db.prepare("INSERT INTO organization_usage(organization_id,period,analyses) VALUES(?,?,1) ON CONFLICT(organization_id,period) DO UPDATE SET analyses=analyses+1").run(orgId,period);
- return usage;
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const usage=orgUsage(orgId);
+    if(usage.analyses>=usage.limit)throw new Error(`Monthly analysis quota reached (${usage.analyses}/${usage.limit}). Upgrade your plan or try next month.`);
+    db.prepare("INSERT INTO organization_usage(organization_id,period,analyses) VALUES(?,?,1) ON CONFLICT(organization_id,period) DO UPDATE SET analyses=analyses+1").run(orgId,usage.period);
+    db.exec("COMMIT");
+    return usage;
+  } catch (error) {
+    db.exec("ROLLBACK");
+    throw error;
+  }
 }
 export function setOrganizationSubscription(orgId:string,plan:"free"|"team",status:string,customerId?:string|null,subscriptionId?:string|null) {
  db.prepare("UPDATE organizations SET plan=?,subscription_status=?,billing_customer_id=COALESCE(?,billing_customer_id),billing_subscription_id=COALESCE(?,billing_subscription_id) WHERE id=?")
