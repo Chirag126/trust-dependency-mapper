@@ -60,6 +60,12 @@ async function main() {
   for (let i = 0; i < 10; i++) reserveOrgAnalysis(org.id);
   assert.throws(() => reserveOrgAnalysis(org.id), /quota reached/i, "free organization quota must be enforced server-side");
   assert.equal(orgUsage(org.id).analyses,10,"failed quota reservation must not increment usage");
+  const otherOrg=createOrganization(outsider.id,`Other workspace ${suffix}`);
+  assert.throws(()=>saveAnalysis(orgAnalysis,"selftest",otherOrg.id),/access is denied/i,"one organization cannot overwrite another organization's analysis ID");
+  const parallelQuotaOrg=createOrganization(outsider.id,`Concurrent quota ${suffix}`);
+  const reservationResults=await Promise.all(Array.from({length:20},()=>Promise.resolve().then(()=>{try{reserveOrgAnalysis(parallelQuotaOrg.id);return true;}catch{return false;}})));
+  assert.equal(reservationResults.filter(Boolean).length,10,"concurrent reservations must never exceed the free-plan limit");
+  assert.equal(orgUsage(parallelQuotaOrg.id).analyses,10,"concurrent quota accounting must remain exact");
   assert.equal(saveBillingEvent(`evt-${suffix}`, "test", "test.event", {}) , true, "first billing event should be recorded");
   assert.equal(saveBillingEvent(`evt-${suffix}`, "test", "test.event", {}) , false, "duplicate billing events should not create duplicate rows");
   assert.equal(isBillingEventProcessed(`evt-${suffix}`),false,"unprocessed webhook should remain retryable");
