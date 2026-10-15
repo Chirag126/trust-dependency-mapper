@@ -18,6 +18,8 @@ export const db = new DatabaseSync(dbPath, {
 });
 
 db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;");
+try { db.exec("ALTER TABLE analyses ADD COLUMN organization_id TEXT"); } catch {}
+try { db.exec("ALTER TABLE watchlist ADD COLUMN organization_id TEXT"); } catch {}
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS analyses (
@@ -117,7 +119,7 @@ export function consumeRefreshToken(raw: string) {
   return user;
 }
 
-export function saveAnalysis(a: Analysis, session: string) {
+export function saveAnalysis(a: Analysis, session: string, organizationId?: string) {
   db.prepare(`INSERT OR REPLACE INTO analyses
     (id,created_at,input_type,input_label,network,status,duration_ms,analysis_json,anonymous_session)
     VALUES (@id,@createdAt,@inputType,@inputLabel,@network,@status,@durationMs,@json,@session)`)
@@ -159,7 +161,7 @@ export function analytics() {
   return { totalAnalyses: total, completed, partial, failed: total - completed - partial, uniqueUsers, avgDurationMs: Math.round(avgMs), last24h, last7d, byInput, byNetwork, events };
 }
 
-export function saveWatch(name: string, inputType: string, inputLabel: string, network: string | undefined, baseline: Analysis) {
+export function saveWatch(name: string, inputType: string, inputLabel: string, network: string | undefined, baseline: Analysis, organizationId?: string) {
   const result = db.prepare(`INSERT INTO watchlist(created_at,name,input_type,input_label,network,baseline_json)
     VALUES(?,?,?,?,?,?)`).run(new Date().toISOString(), name, inputType, inputLabel, network || null, JSON.stringify(baseline));
   return Number(result.lastInsertRowid);
