@@ -13,7 +13,7 @@ import { compareAnalyses, blastRadius } from "./compare";
 import { db, analytics, getAnalysis, getAnalysisForUser, listAnalyses, listAnalysesForUser, saveAnalysis, saveWatch, listWatch, getWatch, updateWatch, ensureAdminUser, logEvent, startWatchRun, updateWatchRun, getWatchRun, saveWatchSnapshot, listWatchSnapshots, createUser, createOrganization, listOrganizationsForUser, getOrganization, getMembership, listMembers, addMember, changeMemberRole, removeMember, orgUsage, reserveOrgAnalysis, setOrganizationSubscription, saveBillingEvent, markBillingEventProcessed, getAnalysisOrganization, listOrganizationAnalyses } from "./db";
 import { normalizeGithub, safeSession } from "./utils";
 import { networks, withRetry } from "./chain";
-import { login, refresh, requireAdmin, userLogin, requireUser } from "./auth";
+import { login, refresh, requireAdmin, userLogin, userRefresh, userLogout, requireUser } from "./auth";
 import { buildSecurityReport } from "./report";
 import { buildSarif } from "./sarif";
 import { mergeSlitherJson } from "./toolImport";
@@ -67,6 +67,18 @@ app.post("/api/accounts/login",async(req,res)=>{
  const p=z.object({email:z.string().email(),password:z.string().min(1)}).safeParse(req.body);
  if(!p.success)return res.status(400).json({error:"Email and password required"});
  const out=await userLogin(p.data.email,p.data.password); if(!out)return res.status(401).json({error:"Invalid credentials"}); res.json(out);
+});
+app.post("/api/accounts/refresh",async(req,res)=>{
+ const p=z.object({refresh:z.string().min(20).max(256)}).safeParse(req.body);
+ if(!p.success)return res.status(400).json({error:"Refresh token required"});
+ const out=await userRefresh(p.data.refresh);
+ if(!out)return res.status(401).json({error:"Invalid or expired refresh token"});
+ res.json(out);
+});
+app.post("/api/accounts/logout",async(req,res)=>{
+ const ok=await userLogout(bearer(req));
+ if(!ok)return res.status(401).json({error:"Sign in again before logging out"});
+ res.json({ok:true});
 });
 app.get("/api/organizations",async(req,res)=>{
  const user=await requireUser(bearer(req));if(!user)return res.status(401).json({error:"Sign in required"});
