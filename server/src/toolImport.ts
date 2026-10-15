@@ -25,7 +25,7 @@ function normalizeSlitherFinding(raw: ExternalFinding, index: number) {
     const sm = el.source_mapping || {};
     return {
       source: "source" as const,
-      ...(sm.filename_relative || sm.filename_absolute ? { file: String(sm.filename_relative || sm.filename_absolute).replace(/\\\\/g, "/").slice(0, 500) } : {}),
+      ...(sm.filename_relative || sm.filename_absolute ? { file: String(sm.filename_relative || sm.filename_absolute).replace(/\\/g, "/").slice(0, 500) } : {}),
       ...(Array.isArray(sm.lines) && Number.isInteger(sm.lines[0]) && sm.lines[0] > 0 ? { line: sm.lines[0] } : {}),
       ...(el.name ? { function: String(el.name).slice(0, 300) } : {}),
       reason: `Imported from Slither: ${title}`,
