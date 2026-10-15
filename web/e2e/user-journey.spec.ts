@@ -1,8 +1,10 @@
 import { test, expect } from "@playwright/test";
 import { execFileSync } from "node:child_process";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
-const serverDir = path.resolve(__dirname, "../../server");
+const here = path.dirname(fileURLToPath(import.meta.url));
+const serverDir = path.resolve(here, "../../server");
 const password = "playwright-test-password-123";
 
 function solidityZip(): Buffer {
@@ -46,6 +48,12 @@ test("browser journey: account, workspace, Solidity ZIP, report exports, watch, 
   });
   await page.getByRole("button", { name: /Analyze trust surface/ }).click();
   await expect(page.getByText("ANALYSIS COMPLETE")).toBeVisible({ timeout: 45_000 });
+  await expect(page.locator(".graph-panel")).toBeVisible();
+  await expect(page.locator(".graph-panel svg g.node").first()).toBeVisible();
+  await expect(page.locator(".lower-grid")).toBeVisible();
+  await page.locator(".graph-panel svg g.node").nth(1).click();
+  await expect(page.getByText("Dependency detail")).toBeVisible();
+  await expect(page.getByText("Blast radius")).toBeVisible();
   await expect(page.locator("aside").getByRole("button", { name: "Security report" })).toBeVisible();
 
   await page.getByRole("button", { name: "Watch", exact: true }).click();
