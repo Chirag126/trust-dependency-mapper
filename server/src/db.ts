@@ -134,13 +134,25 @@ export function logEvent(event: string, session: string, metadata: Record<string
     .run(new Date().toISOString(), event, session, JSON.stringify(metadata));
 }
 
-export function getAnalysis(id: string): Analysis | null {
-  const row = db.prepare("SELECT analysis_json FROM analyses WHERE id=?").get(id) as any;
-  return row ? JSON.parse(row.analysis_json) : null;
+export function getAnalysis(id:string):Analysis|null {
+ const row=db.prepare("SELECT analysis_json FROM analyses WHERE id=? AND organization_id IS NULL").get(id) as any;
+ return row?JSON.parse(row.analysis_json):null;
 }
-export function listAnalyses(limit = 50): Analysis[] {
-  const rows = db.prepare("SELECT analysis_json FROM analyses ORDER BY created_at DESC LIMIT ?").all(limit) as any[];
-  return rows.map(r => JSON.parse(r.analysis_json));
+export function getAnalysisOrganization(id:string):string|null {
+ const row=db.prepare("SELECT organization_id FROM analyses WHERE id=?").get(id) as any;
+ return row?.organization_id||null;
+}
+export function getAnalysisForUser(id:string,userId:string):Analysis|null {
+ const row=db.prepare("SELECT a.analysis_json FROM analyses a LEFT JOIN organization_members m ON m.organization_id=a.organization_id AND m.user_id=? WHERE a.id=? AND (a.organization_id IS NULL OR m.user_id IS NOT NULL)").get(userId,id) as any;
+ return row?JSON.parse(row.analysis_json):null;
+}
+export function listAnalyses(limit=50):Analysis[] {
+ const rows=db.prepare("SELECT analysis_json FROM analyses WHERE organization_id IS NULL ORDER BY created_at DESC LIMIT ?").all(limit) as any[];
+ return rows.map(r=>JSON.parse(r.analysis_json));
+}
+export function listAnalysesForUser(userId:string,limit=50):Analysis[] {
+ const rows=db.prepare("SELECT a.analysis_json FROM analyses a LEFT JOIN organization_members m ON m.organization_id=a.organization_id AND m.user_id=? WHERE a.organization_id IS NULL OR m.user_id IS NOT NULL ORDER BY a.created_at DESC LIMIT ?").all(userId,limit) as any[];
+ return rows.map(r=>JSON.parse(r.analysis_json));
 }
 
 export function analytics() {
