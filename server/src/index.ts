@@ -146,9 +146,10 @@ app.post("/api/auth/refresh", async (req, res) => {
 
 app.post("/api/analyze/address", async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
-  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   const p = z.object({ address: z.string(), network: z.enum(networks as [string, ...string[]]) }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });\n  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+  if (!p.success) return res.status(400).json({ error: "Address and supported network are required" });  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+
+  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const a = await analyzeAddress(p.data.address, p.data.network as any);
     saveAnalysis(a, session(req), org?.org.id);
@@ -161,7 +162,9 @@ app.post("/api/analyze/address", async (req, res) => {
 app.post("/api/analyze/github", async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
   const p = z.object({ url: z.string().url() }).safeParse(req.body);
-  if (!p.success) return res.status(400).json({ error: "Valid GitHub repository URL required" });\n  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+  if (!p.success) return res.status(400).json({ error: "Valid GitHub repository URL required" });  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+
+  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const { owner, repo } = normalizeGithub(p.data.url);
     const a = await analyzeGithub(owner, repo);
@@ -187,7 +190,9 @@ function extractZip(buffer: Buffer) {
 }
 app.post("/api/analyze/zip", upload.single("project"), async (req, res) => {
   const org = await optionalOrgContext(req,res); if(org===false)return;
-  if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });\n  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+  if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
+  if (!req.file) return res.status(400).json({ error: "Upload a .zip Solidity project" });
+  if(org){try{reserveOrgAnalysis(org.org.id);}catch(e:any){return res.status(429).json({error:e.message});}}
   try {
     const files = extractZip(req.file.buffer);
     if (!files.some(f => f.path.endsWith(".sol"))) return res.status(400).json({ error: "ZIP contains no Solidity files" });
