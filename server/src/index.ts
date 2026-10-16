@@ -22,6 +22,7 @@ import { buildAiSecurityReport } from "./aiReport";
 ensureAdminUser(config.adminUsername, config.adminPassword);
 
 const app = express();
+app.set("trust proxy", 1);
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.json({ limit: "2mb", verify: (req:any, _res, buf) => { req.rawBody = Buffer.from(buf); } }));
 app.use(rateLimit({ windowMs: 60_000, max: 80, standardHeaders: true, legacyHeaders: false }));
