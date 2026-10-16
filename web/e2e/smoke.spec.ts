@@ -19,5 +19,5 @@ test("@smoke production-like app and API health endpoints respond", async ({ pag
 
   await page.goto("/");
   await expect(page.getByRole("heading", { name: /know what your protocol trusts/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Analyze" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Analyze", exact: true })).toBeVisible();
 });
