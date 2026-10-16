@@ -77,6 +77,9 @@ test("API integration: accounts, workspace isolation, analysis, reports, watchli
     if (child?.exitCode && child.exitCode !== 0) assert.fail(`API process failed: ${logs}`);
   });
   await waitForApi(`${base}/api/health`, child);
+  const readiness = await fetch(`${base}/api/health/ready`);
+  assert.equal(readiness.status, 200, "readiness endpoint reports database availability");
+  assert.deepEqual(await readiness.json(), { ok: true, checks: { database: "ok" } });
 
   const unauthenticated = await request("/api/organizations");
   assert.equal(unauthenticated.status, 401, "organization endpoints require authentication");

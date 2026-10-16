@@ -5,7 +5,7 @@ services:
     rootDir: server
     buildCommand: npm ci && npm run build
     startCommand: npm start
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/ready
     autoDeploy: true
     envVars:
       - key: NODE_VERSION

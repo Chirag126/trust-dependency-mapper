@@ -37,12 +37,12 @@ jobs:
       - name: Install frontend dependencies
         working-directory: web
         run: npm ci
-      - name: Install Playwright test runner
-        working-directory: web
-        run: npm install --no-save @playwright/test
       - name: Install Chromium for browser tests
         working-directory: web
         run: npx playwright install --with-deps chromium
+      - name: Run deployment smoke journeys
+        working-directory: web
+        run: npm run test:e2e:smoke
       - name: Run browser end-to-end journeys
         working-directory: web
         run: npm run test:e2e

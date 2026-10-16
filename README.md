@@ -186,6 +186,10 @@ curl -X POST "$TDM_API/api/analyses/ANALYSIS_ID/import/slither" \
 ### Trace and source-matching boundaries
 Runtime trace data remains RPC-provider-dependent. TDM reports whether trace output was actually observed and records the number of supported getter probes attempted, rather than treating missing trace output as proof that no external calls exist. Address analyses also include the deployed bytecode keccak256 hash and observed block number as a reproducible code fingerprint; this is not by itself a source-verification proof. Source locations imported from third-party tools are evidence references, not proof that a finding is exploitable. Review imported findings against the exact source revision and deployed bytecode before acting on them.
 
+## Deployment operations
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for the supported Node/npm versions, production startup, health/readiness checks, environment variable inventory, SQLite persistence and backup guidance, HTTPS/CORS/secrets, logging/monitoring, and staging RPC/rate-limit verification. GitHub Actions runs on pull requests; repository branch protection must mark the CI check as required to block merges when checks fail.
+
 ## Test
 
 ```bash
@@ -231,7 +235,6 @@ Browser journeys use Playwright and Chromium to cover registration, organization
 ```bash
 cd web
 npm ci
-npm install --no-save @playwright/test
 npx playwright install chromium
 npm run test:e2e
 npm run build
