@@ -25,7 +25,7 @@ This is a production-oriented starter, not a claim of formal security correctnes
 - **Runtime watchlist**: re-check tracked contracts, compare dependency graph snapshots, retain immutable history, and expose check status, progress, retry attempts, and failures.
 - **Organization workspaces**: signed user accounts, owner/admin/member roles, organization-scoped analyses and watchlists, and server-side quotas.
 - **Plan enforcement**: free organizations receive 10 analyses per calendar month; team organizations receive 250 when a verified subscription webhook activates the plan.
-- **Billing webhook adapter**: optional HMAC-SHA256 verification, replay/idempotency protection, and subscription-state updates. A payment-provider checkout is not bundled; connect a provider adapter before taking payments.
+- **Razorpay billing preview**: server-side subscription creation and raw-body HMAC-SHA256 webhook verification are available behind environment configuration. The browser checkout experience, merchant onboarding, lifecycle reconciliation, and full provider end-to-end validation must be completed before live billing is enabled. Paid plans must remain labeled preview until then.
 - **Admin analytics**: anonymous usage counters, analysis success/failure, networks, input types, latency. No wallet/private-key data is collected.
 - **Audit log**: analysis lifecycle logs for each run.
 
@@ -104,7 +104,8 @@ Public RPC endpoints can rate-limit. For reliable production usage, use your own
 - `POST /api/organizations` and `GET /api/organizations`
 - `GET /api/organizations/members`, `POST /api/organizations/members`, `PATCH /api/organizations/members/:userId`, `DELETE /api/organizations/members/:userId`
 - `GET /api/organizations/usage`
-- `POST /api/billing/webhook` (signed HMAC event adapter; disabled unless secret configured)
+- `POST /api/billing/checkout` (owner-only Razorpay subscription creation; returns a subscription ID for Razorpay Checkout; disabled until server credentials and plan ID are configured)
+- `POST /api/billing/webhook` (Razorpay signed webhook endpoint; disabled unless webhook secret configured)
 - `GET /api/watchlist`
 - `POST /api/watchlist/:id/check` — retry-backed runtime analysis, baseline comparison, and persisted snapshot
 - `GET /api/watchlist/:id/status` — latest run status and progress
