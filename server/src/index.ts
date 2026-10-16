@@ -119,23 +119,89 @@ app.delete("/api/organizations/members/:userId",async(req,res)=>{
 app.get("/api/organizations/usage",async(req,res)=>{
  const ctx=await orgContext(req,res);if(!ctx)return;res.json(orgUsage(ctx.org.id));
 });
-app.post("/api/billing/webhook",async(req:any,res)=>{
- const secret=process.env.BILLING_WEBHOOK_SECRET||"";
- if(!secret)return res.status(503).json({error:"Billing webhooks are disabled until BILLING_WEBHOOK_SECRET is configured"});
- const signature=String(req.header("x-billing-signature")||"");
- const expected=crypto.createHmac("sha256",secret).update(req.rawBody||Buffer.from("")).digest("hex");
- const a=Buffer.from(signature),b=Buffer.from(expected);
- if(a.length!==b.length||!crypto.timingSafeEqual(a,b))return res.status(401).json({error:"Invalid billing webhook signature"});
- const p=z.object({id:z.string().min(1),type:z.string().min(1),organizationId:z.string().uuid(),plan:z.enum(["free","team"]).optional(),status:z.enum(["active","trialing","past_due","canceled","incomplete","unpaid"]).optional(),customerId:z.string().max(200).optional(),subscriptionId:z.string().max(200).optional()}).safeParse(req.body);
- if(!p.success)return res.status(400).json({error:"Invalid billing event payload"});
- if(!getOrganization(p.data.organizationId))return res.status(404).json({error:"Organization not found"});
- if(!saveBillingEvent(p.data.id,"generic-hmac",p.data.type,req.body)&&isBillingEventProcessed(p.data.id))return res.json({received:true,duplicate:true});
- if(p.data.type==="subscription.updated"||p.data.type==="subscription.created"||p.data.type==="subscription.deleted"){
-  const status=p.data.type==="subscription.deleted"?"canceled":(p.data.status||"active");
-  const plan=status==="active"?(p.data.plan||"team"):"free";
-  setOrganizationSubscription(p.data.organizationId,plan,status,p.data.customerId,p.data.subscriptionId);
- }
- markBillingEventProcessed(p.data.id);res.json({received:true});
+app.post("/api/billing/checkout", async (req, res) => {
+  const ctx = await orgContext(req, res, "owner");
+  if (!ctx) return;
+  if (!config.razorpayKeyId || !config.razorpayKeySecret || !config.razorpayTeamPlanId) {
+    return res.status(503).json({ error: "Razorpay subscriptions are in preview until server credentials and the Team plan ID are configured." });
+  }
+  const p = z.object({ plan: z.literal("team") }).safeParse(req.body);
+  if (!p.success) return res.status(400).json({ error: "Unsupported subscription plan" });
+  try {
+    const response = await fetch("https://api.razorpay.com/v1/subscriptions", {
+      method: "POST",
+      headers: {
+        authorization: "Basic " + Buffer.from(config.razorpayKeyId + ":" + config.razorpayKeySecret).toString("base64"),
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        plan_id: config.razorpayTeamPlanId,
+        total_count: 120,
+        quantity: 1,
+        customer_notify: 1,
+        notes: { organizationId: ctx.org.id, plan: "team", initiatedBy: ctx.user.id }
+      }),
+      signal: AbortSignal.timeout(10000)
+    });
+    const body: any = await response.json().catch(() => ({}));
+    if (!response.ok || typeof body.id !== "string") {
+      console.error("Razorpay subscription creation failed", { status: response.status, code: body?.error?.code });
+      return res.status(502).json({ error: "Could not create a Razorpay subscription. No paid access was granted." });
+    }
+    logEvent("billing_checkout_created", ctx.user.id, { organizationId: ctx.org.id, provider: "razorpay", plan: "team" });
+    return res.status(201).json({ provider: "razorpay", keyId: config.razorpayKeyId, subscriptionId: body.id, status: body.status, checkoutRequired: true });
+  } catch (error) {
+    console.error("Razorpay subscription request failed", error);
+    return res.status(502).json({ error: "Razorpay is temporarily unavailable. Please retry later." });
+  }
+});
+
+app.post("/api/billing/webhook", async (req: any, res) => {
+  const secret = config.razorpayWebhookSecret;
+  if (!secret) return res.status(503).json({ error: "Razorpay webhook processing is disabled until RAZORPAY_WEBHOOK_SECRET is configured" });
+  const signature = String(req.header("x-razorpay-signature") || "");
+  const expected = crypto.createHmac("sha256", secret).update(req.rawBody || Buffer.from("")).digest("hex");
+  const actualBytes = Buffer.from(signature, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  if (actualBytes.length !== expectedBytes.length || !crypto.timingSafeEqual(actualBytes, expectedBytes)) {
+    return res.status(401).json({ error: "Invalid Razorpay webhook signature" });
+  }
+
+  const eventId = String(req.header("x-razorpay-event-id") || "");
+  const eventType = typeof req.body?.event === "string" ? req.body.event : "";
+  const subscription = req.body?.payload?.subscription?.entity;
+  if (!eventId || !eventType || !subscription || typeof subscription.id !== "string") {
+    return res.status(400).json({ error: "Invalid Razorpay subscription event" });
+  }
+  const notes = subscription.notes || {};
+  const organizationId = typeof notes.organizationId === "string" ? notes.organizationId : "";
+  if (!z.string().uuid().safeParse(organizationId).success || !getOrganization(organizationId)) {
+    return res.status(400).json({ error: "Razorpay event is missing a valid organization association" });
+  }
+  if (isBillingEventProcessed(eventId)) return res.json({ received: true, duplicate: true });
+  if (!saveBillingEvent(eventId, "razorpay", eventType, req.body)) {
+    if (isBillingEventProcessed(eventId)) return res.json({ received: true, duplicate: true });
+    return res.status(503).json({ error: "Could not persist billing event; Razorpay should retry delivery" });
+  }
+
+  const statusByEvent: Record<string, string> = {
+    "subscription.activated": "active",
+    "subscription.charged": "active",
+    "subscription.pending": "past_due",
+    "subscription.halted": "unpaid",
+    "subscription.cancelled": "canceled",
+    "subscription.completed": "canceled",
+    "subscription.paused": "past_due",
+    "subscription.resumed": "active",
+    "subscription.updated": String(subscription.status || "incomplete")
+  };
+  const status = statusByEvent[eventType];
+  if (status) {
+    const plan = status === "active" ? (notes.plan === "team" ? "team" : "free") : "free";
+    setOrganizationSubscription(organizationId, plan, status, subscription.customer_id, subscription.id);
+  }
+  markBillingEventProcessed(eventId);
+  return res.json({ received: true });
 });
 
 async function optionalOrgContext(req:express.Request,res:express.Response) {
