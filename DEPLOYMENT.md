@@ -37,7 +37,11 @@ In another terminal, verify both health endpoints with curl against localhost:40
 | RPC_BASE | Base JSON-RPC URL | Use a provider with appropriate quota |
 | GITHUB_TOKEN | Higher GitHub API quota for public repo analysis | Optional; store as a secret |
 | MAX_ZIP_MB | Upload size limit | Keep within service memory budget |
-| BILLING_WEBHOOK_SECRET | Optional webhook HMAC secret | Leave unset to disable webhook processing |
+| RAZORPAY_KEY_ID | Razorpay API key ID | Use test-mode credentials in staging; store as a secret |
+| RAZORPAY_KEY_SECRET | Razorpay API key secret | Secret; never expose to frontend or logs |
+| RAZORPAY_WEBHOOK_SECRET | Razorpay webhook signing secret | Configure the exact secret used by the Razorpay webhook endpoint |
+| RAZORPAY_TEAM_PLAN_ID | Razorpay subscription plan ID | Must refer to the reviewed Team recurring plan in the same Razorpay mode |
+| BILLING_WEBHOOK_SECRET | Legacy generic webhook secret | Not used by the Razorpay webhook route |
 
 SESSION_SECRET appears in the example environment file for compatibility; it does not replace ADMIN_JWT_SECRET.
 
@@ -86,3 +90,10 @@ Expected chain IDs: Ethereum 0x1, Sepolia 0xaa36a7, Arbitrum One 0xa4b1, Base 0x
 The GitHub Actions workflow runs backend build/self-tests/integration tests, Playwright smoke and full browser journeys, and frontend build on pull requests. To make GitHub block merges when CI fails, repository administrators must enable branch protection/rulesets for main and mark the required CI job/check as required. A workflow alone does not enforce merge blocking when branch protection is disabled.
 
 Keep PR checks green before merging; inspect Playwright diagnostics artifacts if a browser job fails.
+
+
+## Razorpay billing preview
+
+Billing is not ready to accept live money. Configure Razorpay test-mode values in the hosting secret store and create a recurring Team plan in the Razorpay dashboard first. Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`, and `RAZORPAY_TEAM_PLAN_ID`. Never place the key secret or webhook secret in frontend environment variables.
+
+The owner-only `POST /api/billing/checkout` endpoint creates a subscription server-side and returns the subscription ID and public key ID for the frontend checkout integration. A successful checkout callback must be verified server-side before showing payment success, and paid access must be granted only after a valid webhook confirms the subscription state. Configure the Razorpay webhook URL as `https://YOUR_API_HOST/api/billing/webhook` for subscription lifecycle events. Test activation, renewal/charge, pending, halted, cancellation, duplicate delivery, invalid signature, and webhook retry behavior in test mode. Do not enable live checkout until a frontend checkout flow, subscription lifecycle reconciliation, and end-to-end tests have been reviewed and passed.
