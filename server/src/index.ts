@@ -48,7 +48,9 @@ function analysisErrorStatus(error: unknown): number {
   return 400;
 }
 
-
+async function admin(req: express.Request) {
+  return requireAdmin(req.header("authorization")?.replace(/^Bearer\s+/i, ""));
+}
 
 
 function bearer(req:express.Request) { return req.header("authorization")?.replace(/^Bearer\s+/i,""); }
